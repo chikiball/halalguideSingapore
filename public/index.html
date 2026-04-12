@@ -342,6 +342,69 @@
       color: var(--text-secondary);
     }
 
+    /* ─── Location mode toggle ─── */
+    .location-bar {
+      display: flex;
+      gap: 0;
+      padding: 12px 20px 0;
+    }
+    .loc-toggle {
+      flex: 1;
+      padding: 10px 12px;
+      border: 2px solid #e0e0e0;
+      background: var(--card);
+      color: var(--text-secondary);
+      font-size: 13px;
+      font-weight: 600;
+      font-family: inherit;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+    .loc-toggle:first-child { border-radius: var(--radius-sm) 0 0 var(--radius-sm); border-right: none; }
+    .loc-toggle:last-child { border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
+    .loc-toggle.active {
+      background: var(--primary);
+      color: white;
+      border-color: var(--primary);
+    }
+    .loc-info {
+      padding: 6px 20px 0;
+      font-size: 12px;
+      color: var(--text-secondary);
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .loc-info .coord {
+      font-family: 'SF Mono', SFMono-Regular, Menlo, monospace;
+      font-size: 11px;
+      color: var(--primary);
+    }
+    /* Map pick mode crosshair */
+    #map.pick-mode { cursor: crosshair !important; }
+    .pick-banner {
+      display: none;
+      position: absolute;
+      top: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 800;
+      background: var(--primary);
+      color: white;
+      padding: 8px 16px;
+      border-radius: 20px;
+      font-size: 13px;
+      font-weight: 600;
+      box-shadow: var(--shadow-lg);
+      pointer-events: none;
+      white-space: nowrap;
+    }
+    .pick-banner.active { display: block; }
+
     /* ─── Geolocation prompt ─── */
     .geo-prompt {
       display: flex;
@@ -356,6 +419,14 @@
     .geo-prompt h2 { font-size: 22px; font-weight: 700; }
     .geo-prompt p { font-size: 14px; color: var(--text-secondary); max-width: 320px; }
     .geo-prompt .btn { font-size: 16px; padding: 14px 32px; }
+    .geo-prompt .btn-secondary {
+      background: none;
+      color: var(--primary);
+      box-shadow: none;
+      border: 2px solid var(--primary);
+      font-size: 14px;
+      padding: 12px 28px;
+    }
 
     /* ─── Responsive ─── */
     @media (min-width: 600px) {
@@ -379,13 +450,25 @@
     <h2>Find Halal Food Nearby</h2>
     <p>Allow location access to discover halal-certified and Muslim-friendly restaurants around you in Singapore.</p>
     <button class="btn btn-primary" onclick="requestLocation()">
-      📍 Enable Location
+      📍 Use My Location
+    </button>
+    <button class="btn btn-secondary" onclick="startWithMapPick()">
+      🗺️ Choose on Map
     </button>
   </div>
 
   <!-- Main app (hidden until location granted) -->
   <div id="appMain" style="display:none;">
-    <div id="map"></div>
+    <div style="position:relative;">
+      <div id="map"></div>
+      <div class="pick-banner" id="pickBanner">📍 Tap the map to pick a location</div>
+    </div>
+
+    <div class="location-bar">
+      <button class="loc-toggle active" id="btnGPS" onclick="switchMode('gps')">📍 My Location</button>
+      <button class="loc-toggle" id="btnPick" onclick="switchMode('pick')">🗺️ Pick on Map</button>
+    </div>
+    <div class="loc-info" id="locInfo"></div>
 
     <div class="controls">
       <select id="radiusSelect" class="radius-select" aria-label="Search radius">
@@ -430,9 +513,11 @@
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
   <script>
-    let map, userMarker, markersLayer;
-    let userLat, userLng;
+    let map, userMarker, pickedMarker, markersLayer;
+    let userLat, userLng;       // GPS position (if available)
+    let searchLat, searchLng;   // Active search position (GPS or picked)
     let places = [];
+    let locationMode = "gps";   // "gps" or "pick"
 
     // ─── Custom map icons ───
     const userIcon = L.divIcon({
@@ -440,6 +525,13 @@
       html: `<div style="width:20px;height:20px;background:#4285f4;border:3px solid white;border-radius:50%;box-shadow:0 2px 8px rgba(66,133,244,0.5);"></div>`,
       iconSize: [20, 20],
       iconAnchor: [10, 10],
+    });
+
+    const pickedIcon = L.divIcon({
+      className: "",
+      html: `<div style="width:24px;height:24px;background:#e53935;border:3px solid white;border-radius:50%;box-shadow:0 2px 8px rgba(229,57,53,0.5);position:relative;"><div style="position:absolute;top:-18px;left:50%;transform:translateX(-50);font-size:18px;">📍</div></div>`,
+      iconSize: [24, 24],
+      iconAnchor: [12, 12],
     });
 
     const halalIcon = L.divIcon({
@@ -460,23 +552,90 @@
         (pos) => {
           userLat = pos.coords.latitude;
           userLng = pos.coords.longitude;
-          document.getElementById("geoPrompt").style.display = "none";
-          document.getElementById("appMain").style.display = "block";
-          initMap();
+          searchLat = userLat;
+          searchLng = userLng;
+          locationMode = "gps";
+          showApp();
+          updateLocInfo();
           searchHalal();
         },
         (err) => {
-          // Default to Singapore city center on denial
           console.warn("Geolocation denied, defaulting to Singapore center");
           userLat = 1.3521;
           userLng = 103.8198;
-          document.getElementById("geoPrompt").style.display = "none";
-          document.getElementById("appMain").style.display = "block";
-          initMap();
+          searchLat = userLat;
+          searchLng = userLng;
+          locationMode = "gps";
+          showApp();
+          updateLocInfo();
           searchHalal();
         },
         { enableHighAccuracy: true, timeout: 10000 }
       );
+    }
+
+    // ─── Start with map pick (no GPS) ───
+    function startWithMapPick() {
+      // Default to Singapore city center
+      userLat = null;
+      userLng = null;
+      searchLat = 1.3521;
+      searchLng = 103.8198;
+      locationMode = "pick";
+      showApp();
+      switchMode("pick");
+    }
+
+    function showApp() {
+      document.getElementById("geoPrompt").style.display = "none";
+      document.getElementById("appMain").style.display = "block";
+      if (!map) initMap();
+    }
+
+    // ─── Mode switching ───
+    function switchMode(mode) {
+      locationMode = mode;
+      const btnGPS = document.getElementById("btnGPS");
+      const btnPick = document.getElementById("btnPick");
+      const mapEl = document.getElementById("map");
+      const pickBanner = document.getElementById("pickBanner");
+
+      if (mode === "gps") {
+        btnGPS.classList.add("active");
+        btnPick.classList.remove("active");
+        mapEl.classList.remove("pick-mode");
+        pickBanner.classList.remove("active");
+
+        // If we have GPS coords, use them
+        if (userLat && userLng) {
+          searchLat = userLat;
+          searchLng = userLng;
+          map.setView([searchLat, searchLng], 15);
+          updateLocInfo();
+        } else {
+          // Request GPS
+          requestLocation();
+          return;
+        }
+      } else {
+        btnPick.classList.add("active");
+        btnGPS.classList.remove("active");
+        mapEl.classList.add("pick-mode");
+        pickBanner.classList.add("active");
+        updateLocInfo();
+      }
+    }
+
+    // ─── Location info display ───
+    function updateLocInfo() {
+      const el = document.getElementById("locInfo");
+      if (locationMode === "gps") {
+        el.innerHTML = `📡 Using GPS — <span class="coord">${searchLat.toFixed(4)}, ${searchLng.toFixed(4)}</span>`;
+      } else if (searchLat && searchLng) {
+        el.innerHTML = `🗺️ Map selection — <span class="coord">${searchLat.toFixed(4)}, ${searchLng.toFixed(4)}</span>`;
+      } else {
+        el.innerHTML = `🗺️ Tap the map to select a location`;
+      }
     }
 
     // ─── Initialise map ───
@@ -484,7 +643,7 @@
       map = L.map("map", {
         zoomControl: false,
         attributionControl: false,
-      }).setView([userLat, userLng], 15);
+      }).setView([searchLat, searchLng], 15);
 
       L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
         maxZoom: 19,
@@ -496,11 +655,45 @@
 
       L.control.zoom({ position: "topright" }).addTo(map);
 
-      userMarker = L.marker([userLat, userLng], { icon: userIcon })
-        .addTo(map)
-        .bindPopup("<b>You are here</b>");
+      // Show GPS marker if we have GPS position
+      if (userLat && userLng) {
+        userMarker = L.marker([userLat, userLng], { icon: userIcon })
+          .addTo(map)
+          .bindPopup("<b>You are here</b>");
+      }
 
       markersLayer = L.layerGroup().addTo(map);
+
+      // ─── Map click handler for pick mode ───
+      map.on("click", function (e) {
+        if (locationMode !== "pick") return;
+
+        searchLat = e.latlng.lat;
+        searchLng = e.latlng.lng;
+
+        // Place or move the picked marker (draggable)
+        if (pickedMarker) {
+          pickedMarker.setLatLng(e.latlng);
+        } else {
+          pickedMarker = L.marker(e.latlng, {
+            icon: pickedIcon,
+            draggable: true,
+          }).addTo(map).bindPopup("<b>Search here</b>").openPopup();
+
+          // Update on drag end
+          pickedMarker.on("dragend", function (ev) {
+            const pos = ev.target.getLatLng();
+            searchLat = pos.lat;
+            searchLng = pos.lng;
+            updateLocInfo();
+          });
+        }
+
+        updateLocInfo();
+
+        // Hide banner after first pick
+        document.getElementById("pickBanner").classList.remove("active");
+      });
     }
 
     // ─── Search API ───
@@ -520,7 +713,7 @@
       markersLayer.clearLayers();
 
       try {
-        const res = await fetch(`/api/halal?lat=${userLat}&lng=${userLng}&radius=${radius}`);
+        const res = await fetch(`/api/halal?lat=${searchLat}&lng=${searchLng}&radius=${radius}`);
         const data = await res.json();
 
         if (!res.ok) throw new Error(data.error || "Server error");
@@ -529,7 +722,7 @@
 
         // Sort by distance
         places.forEach((p) => {
-          p.distance = getDistance(userLat, userLng, p.lat, p.lng);
+          p.distance = getDistance(searchLat, searchLng, p.lat, p.lng);
         });
         places.sort((a, b) => a.distance - b.distance);
 
@@ -555,7 +748,7 @@
 
         // Fit bounds
         const bounds = L.latLngBounds(places.map((p) => [p.lat, p.lng]));
-        bounds.extend([userLat, userLng]);
+        bounds.extend([searchLat, searchLng]);
         map.fitBounds(bounds, { padding: [40, 40] });
 
       } catch (err) {
