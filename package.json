@@ -1,0 +1,17 @@
+{
+  "name": "halal-guide-singapore",
+  "version": "1.0.0",
+  "description": "Mobile-friendly Halal Guide for Singapore — find halal & Muslim-friendly establishments near you",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.0",
+    "node-fetch": "^2.7.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

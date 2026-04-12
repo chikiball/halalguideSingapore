@@ -1,0 +1,707 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#1a6b4a" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <title>Halal Guide Singapore 🇸🇬</title>
+
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+  <style>
+    :root {
+      --primary: #1a6b4a;
+      --primary-light: #e8f5ee;
+      --primary-dark: #0f4a32;
+      --accent: #d4a843;
+      --bg: #f4f6f5;
+      --card: #ffffff;
+      --text: #1a1a2e;
+      --text-secondary: #5a5a7a;
+      --shadow: 0 2px 12px rgba(0,0,0,0.08);
+      --shadow-lg: 0 8px 32px rgba(0,0,0,0.12);
+      --radius: 16px;
+      --radius-sm: 10px;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      -webkit-font-smoothing: antialiased;
+      overflow-x: hidden;
+    }
+
+    /* ─── Header ─── */
+    header {
+      background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+      color: white;
+      padding: 16px 20px;
+      position: sticky;
+      top: 0;
+      z-index: 1000;
+      box-shadow: 0 2px 16px rgba(26,107,74,0.3);
+    }
+    header h1 {
+      font-size: 20px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    header p {
+      font-size: 12px;
+      opacity: 0.85;
+      margin-top: 2px;
+    }
+
+    /* ─── Map ─── */
+    #map {
+      width: 100%;
+      height: 35vh;
+      min-height: 220px;
+      z-index: 1;
+    }
+
+    /* ─── Controls ─── */
+    .controls {
+      padding: 16px 20px;
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .radius-select {
+      flex: 1;
+      min-width: 140px;
+      padding: 12px 16px;
+      border: 2px solid #e0e0e0;
+      border-radius: var(--radius-sm);
+      font-size: 14px;
+      font-family: inherit;
+      background: var(--card);
+      color: var(--text);
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%235a5a7a' stroke-width='2' fill='none'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 14px center;
+    }
+    .btn {
+      padding: 12px 24px;
+      border: none;
+      border-radius: var(--radius-sm);
+      font-size: 14px;
+      font-weight: 600;
+      font-family: inherit;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .btn-primary {
+      background: var(--primary);
+      color: white;
+      box-shadow: 0 4px 12px rgba(26,107,74,0.3);
+    }
+    .btn-primary:active { transform: scale(0.97); }
+    .btn-primary:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    /* ─── Status bar ─── */
+    .status-bar {
+      padding: 0 20px;
+      font-size: 13px;
+      color: var(--text-secondary);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      min-height: 24px;
+    }
+    .status-bar .count {
+      font-weight: 600;
+      color: var(--primary);
+    }
+
+    /* ─── Loading ─── */
+    .loader {
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      padding: 48px 20px;
+      gap: 16px;
+    }
+    .loader.active { display: flex; }
+    .spinner {
+      width: 40px;
+      height: 40px;
+      border: 3px solid var(--primary-light);
+      border-top-color: var(--primary);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .loader p { font-size: 14px; color: var(--text-secondary); }
+
+    /* ─── Empty state ─── */
+    .empty-state {
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      padding: 48px 20px;
+      text-align: center;
+    }
+    .empty-state.active { display: flex; }
+    .empty-state .icon { font-size: 48px; margin-bottom: 12px; }
+    .empty-state h3 { font-size: 18px; margin-bottom: 6px; }
+    .empty-state p { font-size: 14px; color: var(--text-secondary); max-width: 300px; }
+
+    /* ─── Cards ─── */
+    .cards {
+      padding: 8px 16px 100px;
+      display: grid;
+      gap: 12px;
+    }
+
+    .card {
+      background: var(--card);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 16px;
+      cursor: pointer;
+      transition: all 0.2s;
+      border: 1px solid rgba(0,0,0,0.04);
+    }
+    .card:active {
+      transform: scale(0.98);
+      box-shadow: var(--shadow-lg);
+    }
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 10px;
+      margin-bottom: 8px;
+    }
+    .card-name {
+      font-size: 16px;
+      font-weight: 600;
+      line-height: 1.3;
+      flex: 1;
+    }
+    .card-badge {
+      font-size: 11px;
+      font-weight: 600;
+      padding: 3px 8px;
+      border-radius: 20px;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    .badge-halal {
+      background: var(--primary-light);
+      color: var(--primary);
+    }
+    .badge-type {
+      background: #fff3e0;
+      color: #e65100;
+    }
+    .card-cuisine {
+      font-size: 13px;
+      color: var(--text-secondary);
+      margin-bottom: 6px;
+    }
+    .card-distance {
+      font-size: 12px;
+      color: var(--accent);
+      font-weight: 600;
+    }
+    .card-address {
+      font-size: 12px;
+      color: var(--text-secondary);
+      margin-top: 4px;
+    }
+
+    /* ─── Detail Modal ─── */
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.5);
+      z-index: 2000;
+      backdrop-filter: blur(4px);
+      -webkit-backdrop-filter: blur(4px);
+      animation: fadeIn 0.2s;
+    }
+    .modal-overlay.active { display: flex; align-items: flex-end; }
+
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+    @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+
+    .modal {
+      background: var(--card);
+      width: 100%;
+      max-height: 85vh;
+      border-radius: 20px 20px 0 0;
+      overflow-y: auto;
+      animation: slideUp 0.3s ease-out;
+      -webkit-overflow-scrolling: touch;
+    }
+    .modal-handle {
+      width: 36px;
+      height: 4px;
+      background: #d0d0d0;
+      border-radius: 2px;
+      margin: 12px auto 0;
+    }
+    .modal-header {
+      padding: 16px 20px 12px;
+      border-bottom: 1px solid #f0f0f0;
+    }
+    .modal-header h2 {
+      font-size: 20px;
+      font-weight: 700;
+      line-height: 1.3;
+    }
+    .modal-badges {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      margin-top: 8px;
+    }
+    .modal-body {
+      padding: 16px 20px 32px;
+    }
+    .detail-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      padding: 12px 0;
+      border-bottom: 1px solid #f5f5f5;
+      font-size: 14px;
+    }
+    .detail-row:last-child { border-bottom: none; }
+    .detail-icon {
+      font-size: 18px;
+      width: 24px;
+      text-align: center;
+      flex-shrink: 0;
+      padding-top: 1px;
+    }
+    .detail-content { flex: 1; }
+    .detail-label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-secondary);
+      margin-bottom: 2px;
+    }
+    .detail-value { color: var(--text); line-height: 1.4; }
+    .detail-value a {
+      color: var(--primary);
+      text-decoration: none;
+      font-weight: 500;
+    }
+    .modal-actions {
+      padding: 0 20px 24px;
+      display: flex;
+      gap: 10px;
+    }
+    .modal-actions .btn {
+      flex: 1;
+      justify-content: center;
+      padding: 14px;
+      border-radius: var(--radius-sm);
+    }
+    .btn-outline {
+      background: var(--primary-light);
+      color: var(--primary);
+      border: none;
+    }
+    .btn-close-modal {
+      position: absolute;
+      top: 16px;
+      right: 16px;
+      background: none;
+      border: none;
+      font-size: 20px;
+      cursor: pointer;
+      color: var(--text-secondary);
+    }
+
+    /* ─── Geolocation prompt ─── */
+    .geo-prompt {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 60px 20px;
+      text-align: center;
+      gap: 16px;
+    }
+    .geo-prompt .icon { font-size: 56px; }
+    .geo-prompt h2 { font-size: 22px; font-weight: 700; }
+    .geo-prompt p { font-size: 14px; color: var(--text-secondary); max-width: 320px; }
+    .geo-prompt .btn { font-size: 16px; padding: 14px 32px; }
+
+    /* ─── Responsive ─── */
+    @media (min-width: 600px) {
+      .cards { grid-template-columns: repeat(2, 1fr); padding: 12px 20px 100px; }
+      #map { height: 40vh; }
+    }
+    @media (min-width: 900px) {
+      .cards { grid-template-columns: repeat(3, 1fr); }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>🕌 Halal Guide SG</h1>
+    <p>Find halal & Muslim-friendly food near you</p>
+  </header>
+
+  <!-- Geolocation prompt -->
+  <div id="geoPrompt" class="geo-prompt">
+    <div class="icon">📍</div>
+    <h2>Find Halal Food Nearby</h2>
+    <p>Allow location access to discover halal-certified and Muslim-friendly restaurants around you in Singapore.</p>
+    <button class="btn btn-primary" onclick="requestLocation()">
+      📍 Enable Location
+    </button>
+  </div>
+
+  <!-- Main app (hidden until location granted) -->
+  <div id="appMain" style="display:none;">
+    <div id="map"></div>
+
+    <div class="controls">
+      <select id="radiusSelect" class="radius-select" aria-label="Search radius">
+        <option value="500">500m radius</option>
+        <option value="1000">1 km radius</option>
+        <option value="1500" selected>1.5 km radius</option>
+        <option value="3000">3 km radius</option>
+        <option value="5000">5 km radius</option>
+      </select>
+      <button id="searchBtn" class="btn btn-primary" onclick="searchHalal()">
+        🔍 Search
+      </button>
+    </div>
+
+    <div class="status-bar" id="statusBar"></div>
+
+    <div class="loader" id="loader">
+      <div class="spinner"></div>
+      <p>Searching halal places nearby…</p>
+    </div>
+
+    <div class="empty-state" id="emptyState">
+      <div class="icon">🔍</div>
+      <h3>No results found</h3>
+      <p>Try increasing the search radius or moving to a different area.</p>
+    </div>
+
+    <div class="cards" id="cards"></div>
+  </div>
+
+  <!-- Detail Modal -->
+  <div class="modal-overlay" id="modalOverlay" onclick="closeModalOutside(event)">
+    <div class="modal" id="modal">
+      <div class="modal-handle"></div>
+      <div class="modal-header" id="modalHeader"></div>
+      <div class="modal-body" id="modalBody"></div>
+      <div class="modal-actions" id="modalActions"></div>
+    </div>
+  </div>
+
+  <!-- Leaflet JS -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <script>
+    let map, userMarker, markersLayer;
+    let userLat, userLng;
+    let places = [];
+
+    // ─── Custom map icons ───
+    const userIcon = L.divIcon({
+      className: "",
+      html: `<div style="width:20px;height:20px;background:#4285f4;border:3px solid white;border-radius:50%;box-shadow:0 2px 8px rgba(66,133,244,0.5);"></div>`,
+      iconSize: [20, 20],
+      iconAnchor: [10, 10],
+    });
+
+    const halalIcon = L.divIcon({
+      className: "",
+      html: `<div style="width:30px;height:30px;background:#1a6b4a;border:2px solid white;border-radius:50%;box-shadow:0 2px 8px rgba(0,0,0,0.2);display:flex;align-items:center;justify-content:center;font-size:15px;">🍽️</div>`,
+      iconSize: [30, 30],
+      iconAnchor: [15, 15],
+    });
+
+    // ─── Request geolocation ───
+    function requestLocation() {
+      if (!navigator.geolocation) {
+        alert("Geolocation is not supported by your browser.");
+        return;
+      }
+
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          userLat = pos.coords.latitude;
+          userLng = pos.coords.longitude;
+          document.getElementById("geoPrompt").style.display = "none";
+          document.getElementById("appMain").style.display = "block";
+          initMap();
+          searchHalal();
+        },
+        (err) => {
+          // Default to Singapore city center on denial
+          console.warn("Geolocation denied, defaulting to Singapore center");
+          userLat = 1.3521;
+          userLng = 103.8198;
+          document.getElementById("geoPrompt").style.display = "none";
+          document.getElementById("appMain").style.display = "block";
+          initMap();
+          searchHalal();
+        },
+        { enableHighAccuracy: true, timeout: 10000 }
+      );
+    }
+
+    // ─── Initialise map ───
+    function initMap() {
+      map = L.map("map", {
+        zoomControl: false,
+        attributionControl: false,
+      }).setView([userLat, userLng], 15);
+
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 19,
+      }).addTo(map);
+
+      L.control.attribution({ position: "bottomright", prefix: false })
+        .addAttribution('© <a href="https://osm.org/copyright">OpenStreetMap</a>')
+        .addTo(map);
+
+      L.control.zoom({ position: "topright" }).addTo(map);
+
+      userMarker = L.marker([userLat, userLng], { icon: userIcon })
+        .addTo(map)
+        .bindPopup("<b>You are here</b>");
+
+      markersLayer = L.layerGroup().addTo(map);
+    }
+
+    // ─── Search API ───
+    async function searchHalal() {
+      const radius = document.getElementById("radiusSelect").value;
+      const loader = document.getElementById("loader");
+      const emptyState = document.getElementById("emptyState");
+      const cardsEl = document.getElementById("cards");
+      const statusBar = document.getElementById("statusBar");
+      const searchBtn = document.getElementById("searchBtn");
+
+      loader.classList.add("active");
+      emptyState.classList.remove("active");
+      cardsEl.innerHTML = "";
+      statusBar.innerHTML = "";
+      searchBtn.disabled = true;
+      markersLayer.clearLayers();
+
+      try {
+        const res = await fetch(`/api/halal?lat=${userLat}&lng=${userLng}&radius=${radius}`);
+        const data = await res.json();
+
+        if (!res.ok) throw new Error(data.error || "Server error");
+
+        places = data.places || [];
+
+        // Sort by distance
+        places.forEach((p) => {
+          p.distance = getDistance(userLat, userLng, p.lat, p.lng);
+        });
+        places.sort((a, b) => a.distance - b.distance);
+
+        loader.classList.remove("active");
+        searchBtn.disabled = false;
+
+        if (places.length === 0) {
+          emptyState.classList.add("active");
+          statusBar.innerHTML = "No halal places found nearby";
+          return;
+        }
+
+        statusBar.innerHTML = `Found <span class="count">${places.length}</span> halal place${places.length > 1 ? "s" : ""} within ${radius >= 1000 ? (radius / 1000) + " km" : radius + "m"}`;
+
+        // Render cards & markers
+        places.forEach((place, i) => {
+          renderCard(place, i);
+          const marker = L.marker([place.lat, place.lng], { icon: halalIcon })
+            .addTo(markersLayer)
+            .bindPopup(`<b>${place.name}</b><br>${formatType(place.type)}`);
+          marker.on("click", () => openModal(i));
+        });
+
+        // Fit bounds
+        const bounds = L.latLngBounds(places.map((p) => [p.lat, p.lng]));
+        bounds.extend([userLat, userLng]);
+        map.fitBounds(bounds, { padding: [40, 40] });
+
+      } catch (err) {
+        loader.classList.remove("active");
+        searchBtn.disabled = false;
+        statusBar.innerHTML = `⚠️ ${err.message}`;
+        console.error(err);
+      }
+    }
+
+    // ─── Render card ───
+    function renderCard(place, index) {
+      const cardsEl = document.getElementById("cards");
+      const card = document.createElement("div");
+      card.className = "card";
+      card.onclick = () => openModal(index);
+      card.setAttribute("role", "button");
+      card.setAttribute("tabindex", "0");
+      card.setAttribute("aria-label", `View details for ${place.name}`);
+
+      const distStr = place.distance < 1000
+        ? `${Math.round(place.distance)}m away`
+        : `${(place.distance / 1000).toFixed(1)}km away`;
+
+      card.innerHTML = `
+        <div class="card-header">
+          <div class="card-name">${escHtml(place.name)}</div>
+          <span class="card-badge badge-halal">☪ Halal</span>
+        </div>
+        ${place.cuisine ? `<div class="card-cuisine">🍴 ${escHtml(formatCuisine(place.cuisine))}</div>` : ""}
+        <div class="card-distance">📍 ${distStr}</div>
+        ${place.address ? `<div class="card-address">${escHtml(place.address)}</div>` : ""}
+      `;
+      cardsEl.appendChild(card);
+    }
+
+    // ─── Modal ───
+    function openModal(index) {
+      const p = places[index];
+      if (!p) return;
+
+      const distStr = p.distance < 1000
+        ? `${Math.round(p.distance)}m away`
+        : `${(p.distance / 1000).toFixed(1)}km away`;
+
+      document.getElementById("modalHeader").innerHTML = `
+        <h2>${escHtml(p.name)}</h2>
+        <div class="modal-badges">
+          <span class="card-badge badge-halal">☪ ${formatHalalStatus(p.halalStatus)}</span>
+          <span class="card-badge badge-type">${formatType(p.type)}</span>
+        </div>
+      `;
+
+      let bodyHtml = "";
+
+      const rows = [
+        { icon: "📍", label: "Distance", value: distStr },
+        p.cuisine && { icon: "🍴", label: "Cuisine", value: formatCuisine(p.cuisine) },
+        p.address && { icon: "🏠", label: "Address", value: p.address },
+        p.openingHours && { icon: "🕐", label: "Hours", value: p.openingHours },
+        p.phone && { icon: "📞", label: "Phone", value: `<a href="tel:${p.phone}">${escHtml(p.phone)}</a>` },
+        p.website && { icon: "🌐", label: "Website", value: `<a href="${escHtml(p.website)}" target="_blank" rel="noopener">Visit website</a>` },
+        p.operator && { icon: "🏢", label: "Operator", value: p.operator },
+        p.brand && { icon: "🏷️", label: "Brand", value: p.brand },
+        p.description && { icon: "📝", label: "Note", value: p.description },
+      ].filter(Boolean);
+
+      rows.forEach((r) => {
+        bodyHtml += `
+          <div class="detail-row">
+            <div class="detail-icon">${r.icon}</div>
+            <div class="detail-content">
+              <div class="detail-label">${r.label}</div>
+              <div class="detail-value">${typeof r.value === "string" && !r.value.includes("<a") ? escHtml(r.value) : r.value}</div>
+            </div>
+          </div>`;
+      });
+
+      document.getElementById("modalBody").innerHTML = bodyHtml;
+
+      document.getElementById("modalActions").innerHTML = `
+        <button class="btn btn-primary" onclick="navigateTo(${p.lat}, ${p.lng})">🧭 Directions</button>
+        <button class="btn btn-outline" onclick="panTo(${p.lat}, ${p.lng})">🗺️ Show on Map</button>
+      `;
+
+      document.getElementById("modalOverlay").classList.add("active");
+      document.body.style.overflow = "hidden";
+    }
+
+    function closeModal() {
+      document.getElementById("modalOverlay").classList.remove("active");
+      document.body.style.overflow = "";
+    }
+
+    function closeModalOutside(e) {
+      if (e.target === document.getElementById("modalOverlay")) closeModal();
+    }
+
+    function navigateTo(lat, lng) {
+      closeModal();
+      window.open(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`, "_blank");
+    }
+
+    function panTo(lat, lng) {
+      closeModal();
+      map.setView([lat, lng], 17);
+    }
+
+    // ─── Utilities ───
+    function getDistance(lat1, lon1, lat2, lon2) {
+      const R = 6371e3;
+      const dLat = (lat2 - lat1) * Math.PI / 180;
+      const dLon = (lon2 - lon1) * Math.PI / 180;
+      const a = Math.sin(dLat / 2) ** 2 +
+                Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                Math.sin(dLon / 2) ** 2;
+      return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    }
+
+    function formatType(type) {
+      const map = {
+        restaurant: "🍽️ Restaurant",
+        fast_food: "🍔 Fast Food",
+        cafe: "☕ Café",
+        food_court: "🏪 Food Court",
+        butcher: "🥩 Halal Butcher",
+        supermarket: "🛒 Supermarket",
+      };
+      return map[type] || type.charAt(0).toUpperCase() + type.slice(1);
+    }
+
+    function formatCuisine(cuisine) {
+      return cuisine.split(";").map(c => c.trim().replace(/_/g, " ").replace(/\b\w/g, l => l.toUpperCase())).join(", ");
+    }
+
+    function formatHalalStatus(status) {
+      const map = { yes: "Halal", only: "Halal Only", limited: "Halal Options", listed: "Halal Listed" };
+      return map[status] || "Halal";
+    }
+
+    function escHtml(str) {
+      const div = document.createElement("div");
+      div.textContent = str;
+      return div.innerHTML;
+    }
+
+    // Handle escape key for modal
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") closeModal();
+    });
+  </script>
+</body>
+</html>
