@@ -1,12 +1,14 @@
 var express = require("express");
 var fetch = require("node-fetch");
 var path = require("path");
+var crawler = require("./crawler");
 
 var app = express();
 var PORT = process.env.PORT || 3000;
 
 // Serve static files
 app.use(express.static(path.join(__dirname, "public")));
+app.use(express.json());
 
 // ─── Overpass API mirrors (fallback chain) ─────────────────────────────
 var OVERPASS_ENDPOINTS = [
@@ -158,6 +160,41 @@ app.get("/api/halal", function (req, res) {
         error: "Failed to fetch data from OpenStreetMap",
         detail: err.message,
       });
+    });
+});
+
+// ─── Place detail crawling API ─────────────────────────────────────────
+// Simple in-memory cache to avoid re-crawling the same place
+var detailCache = {};
+
+app.post("/api/place/details", function (req, res) {
+  var place = req.body;
+  if (!place || !place.name) {
+    return res.status(400).json({ error: "Place data is required" });
+  }
+
+  // Cache key: name + approximate lat/lng
+  var cacheKey =
+    place.name.toLowerCase() +
+    "_" +
+    Math.round((place.lat || 0) * 1000) +
+    "_" +
+    Math.round((place.lng || 0) * 1000);
+
+  if (detailCache[cacheKey]) {
+    console.log("📦 Cache hit:", place.name);
+    return res.json(detailCache[cacheKey]);
+  }
+
+  crawler
+    .fetchPlaceDetails(place)
+    .then(function (details) {
+      detailCache[cacheKey] = details;
+      res.json(details);
+    })
+    .catch(function (err) {
+      console.error("❌ Crawl error:", err.message);
+      res.status(500).json({ error: "Failed to fetch details", detail: err.message });
     });
 });
 

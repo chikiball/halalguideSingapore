@@ -342,6 +342,98 @@
       color: var(--text-secondary);
     }
 
+    /* ─── Image gallery in modal ─── */
+    .modal-gallery {
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      padding: 0 20px 12px;
+      scroll-snap-type: x mandatory;
+      -webkit-overflow-scrolling: touch;
+    }
+    .modal-gallery::-webkit-scrollbar { display: none; }
+    .gallery-img {
+      flex-shrink: 0;
+      width: 85%;
+      max-width: 360px;
+      height: 200px;
+      border-radius: 14px;
+      object-fit: cover;
+      scroll-snap-align: start;
+      background: #eee;
+    }
+    .gallery-caption {
+      font-size: 11px;
+      color: var(--text-secondary);
+      text-align: center;
+      padding: 4px 20px 0;
+    }
+
+    /* ─── Article in modal ─── */
+    .modal-article {
+      padding: 16px 20px;
+      font-size: 14px;
+      line-height: 1.7;
+      color: var(--text);
+    }
+    .modal-article h3 {
+      font-size: 16px;
+      font-weight: 700;
+      margin: 16px 0 8px;
+      color: var(--primary);
+    }
+    .modal-article p {
+      margin-bottom: 10px;
+    }
+    .modal-article blockquote {
+      border-left: 3px solid var(--primary-light);
+      padding-left: 12px;
+      margin: 8px 0;
+      color: var(--text-secondary);
+      font-style: italic;
+      font-size: 13px;
+    }
+    .modal-article strong {
+      color: var(--text);
+      font-weight: 600;
+    }
+    .modal-sources {
+      padding: 8px 20px 16px;
+      font-size: 11px;
+      color: var(--text-secondary);
+    }
+    .modal-sources a {
+      color: var(--primary);
+      text-decoration: none;
+    }
+
+    /* ─── Shimmer loading ─── */
+    .shimmer-wrap {
+      padding: 16px 20px;
+    }
+    .shimmer {
+      background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+      background-size: 200% 100%;
+      animation: shimmer 1.5s infinite;
+      border-radius: 8px;
+      margin-bottom: 12px;
+    }
+    .shimmer-img {
+      width: 100%;
+      height: 180px;
+      border-radius: 14px;
+      margin: 0 20px 12px;
+      width: calc(100% - 40px);
+    }
+    .shimmer-line { height: 14px; }
+    .shimmer-line-short { height: 14px; width: 60%; }
+    .shimmer-line-med { height: 14px; width: 80%; }
+    .shimmer-title { height: 20px; width: 70%; margin-bottom: 16px; }
+    @keyframes shimmer {
+      0% { background-position: 200% 0; }
+      100% { background-position: -200% 0; }
+    }
+
     /* ─── Location mode toggle ─── */
     .location-bar {
       display: flex;
@@ -504,7 +596,10 @@
     <div class="modal" id="modal">
       <div class="modal-handle"></div>
       <div class="modal-header" id="modalHeader"></div>
+      <div class="modal-gallery" id="modalGallery"></div>
       <div class="modal-body" id="modalBody"></div>
+      <div class="modal-article" id="modalArticle"></div>
+      <div class="modal-sources" id="modalSources"></div>
       <div class="modal-actions" id="modalActions"></div>
     </div>
   </div>
@@ -794,16 +889,17 @@
         ? `${Math.round(p.distance)}m away`
         : `${(p.distance / 1000).toFixed(1)}km away`;
 
+      // Header
       document.getElementById("modalHeader").innerHTML = `
         <h2>${escHtml(p.name)}</h2>
         <div class="modal-badges">
-          <span class="card-badge badge-halal">☪ ${formatHalalStatus(p.halalStatus)}</span>
+          <span class="card-badge ${badgeClass(p.halalStatus)}">☪ ${formatHalalStatus(p.halalStatus)}</span>
           <span class="card-badge badge-type">${formatType(p.type)}</span>
         </div>
       `;
 
+      // Quick info rows (always shown immediately)
       let bodyHtml = "";
-
       const rows = [
         { icon: "📍", label: "Distance", value: distStr },
         p.cuisine && { icon: "🍴", label: "Cuisine", value: formatCuisine(p.cuisine) },
@@ -813,7 +909,6 @@
         p.website && { icon: "🌐", label: "Website", value: `<a href="${escHtml(p.website)}" target="_blank" rel="noopener">Visit website</a>` },
         p.operator && { icon: "🏢", label: "Operator", value: p.operator },
         p.brand && { icon: "🏷️", label: "Brand", value: p.brand },
-        p.description && { icon: "📝", label: "Note", value: p.description },
       ].filter(Boolean);
 
       rows.forEach((r) => {
@@ -826,16 +921,106 @@
             </div>
           </div>`;
       });
-
       document.getElementById("modalBody").innerHTML = bodyHtml;
 
+      // Show shimmer loading in gallery + article areas
+      document.getElementById("modalGallery").innerHTML = `
+        <div class="shimmer shimmer-img" style="flex-shrink:0;"></div>
+      `;
+      document.getElementById("modalArticle").innerHTML = `
+        <div class="shimmer shimmer-title"></div>
+        <div class="shimmer shimmer-line"></div>
+        <div class="shimmer shimmer-line-med"></div>
+        <div class="shimmer shimmer-line"></div>
+        <div class="shimmer shimmer-line-short"></div>
+        <div class="shimmer shimmer-line"></div>
+        <div class="shimmer shimmer-line-med"></div>
+      `;
+      document.getElementById("modalSources").innerHTML = "";
+
+      // Actions
       document.getElementById("modalActions").innerHTML = `
         <button class="btn btn-primary" onclick="navigateTo(${p.lat}, ${p.lng})">🧭 Directions</button>
         <button class="btn btn-outline" onclick="panTo(${p.lat}, ${p.lng})">🗺️ Show on Map</button>
       `;
 
+      // Open modal
       document.getElementById("modalOverlay").classList.add("active");
       document.body.style.overflow = "hidden";
+
+      // Fetch crawled details in background
+      fetchAndRenderDetails(p);
+    }
+
+    // ─── Fetch + render crawled details ───
+    async function fetchAndRenderDetails(place) {
+      try {
+        const res = await fetch("/api/place/details", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(place),
+        });
+
+        if (!res.ok) throw new Error("Failed to fetch");
+        const data = await res.json();
+
+        // Render image gallery
+        if (data.images && data.images.length > 0) {
+          let galleryHtml = "";
+          data.images.forEach((img) => {
+            galleryHtml += `<img class="gallery-img" src="${escHtml(img.url)}" alt="${escHtml(img.caption)}" loading="lazy" onerror="this.style.display='none'" />`;
+          });
+          document.getElementById("modalGallery").innerHTML = galleryHtml;
+        } else {
+          document.getElementById("modalGallery").innerHTML = "";
+        }
+
+        // Render article (convert markdown-ish to HTML)
+        if (data.article) {
+          document.getElementById("modalArticle").innerHTML = renderArticle(data.article);
+        } else {
+          document.getElementById("modalArticle").innerHTML = "<p>No additional information found.</p>";
+        }
+
+        // Render sources
+        let sourcesHtml = "Sources: ";
+        const sourceLinks = [];
+        if (data.sources && data.sources.wikipedia) {
+          sourceLinks.push(`<a href="${escHtml(data.sources.wikipedia)}" target="_blank">Wikipedia</a>`);
+        }
+        if (data.sources && data.sources.website) {
+          sourceLinks.push(`<a href="${escHtml(data.sources.website)}" target="_blank">Website</a>`);
+        }
+        if (sourceLinks.length > 0) {
+          document.getElementById("modalSources").innerHTML = sourcesHtml + sourceLinks.join(" · ");
+        }
+
+      } catch (err) {
+        console.error("Detail fetch error:", err);
+        document.getElementById("modalGallery").innerHTML = "";
+        document.getElementById("modalArticle").innerHTML = `
+          <p style="color: var(--text-secondary);">Could not load additional details. Try again later.</p>
+        `;
+      }
+    }
+
+    // ─── Simple markdown-ish to HTML renderer ───
+    function renderArticle(md) {
+      return md
+        .split("\n\n")
+        .map(function (block) {
+          block = block.trim();
+          if (!block) return "";
+          // Headings
+          if (block.startsWith("### ")) return "<h3>" + escHtml(block.slice(4)) + "</h3>";
+          if (block.startsWith("## ")) return "<h3>" + escHtml(block.slice(3)) + "</h3>";
+          // Blockquotes
+          if (block.startsWith("> ")) return "<blockquote>" + escHtml(block.slice(2)) + "</blockquote>";
+          // Bold: **text**
+          var html = escHtml(block).replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+          return "<p>" + html + "</p>";
+        })
+        .join("\n");
     }
 
     function closeModal() {
