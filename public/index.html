@@ -215,6 +215,10 @@
       background: #fff3e0;
       color: #e65100;
     }
+    .badge-likely {
+      background: #e3f2fd;
+      color: #1565c0;
+    }
     .card-cuisine {
       font-size: 13px;
       color: var(--text-secondary);
@@ -579,7 +583,7 @@
       card.innerHTML = `
         <div class="card-header">
           <div class="card-name">${escHtml(place.name)}</div>
-          <span class="card-badge badge-halal">☪ Halal</span>
+          <span class="card-badge ${badgeClass(place.halalStatus)}">${place.halalStatus === "likely" ? "🟢" : "☪"} ${formatHalalStatus(place.halalStatus)}</span>
         </div>
         ${place.cuisine ? `<div class="card-cuisine">🍴 ${escHtml(formatCuisine(place.cuisine))}</div>` : ""}
         <div class="card-distance">📍 ${distStr}</div>
@@ -688,8 +692,13 @@
     }
 
     function formatHalalStatus(status) {
-      const map = { yes: "Halal", only: "Halal Only", limited: "Halal Options", listed: "Halal Listed" };
+      const map = { yes: "Halal ✓", only: "Halal Only ✓", limited: "Halal Options", likely: "Muslim-Friendly", listed: "Halal Listed" };
       return map[status] || "Halal";
+    }
+
+    function badgeClass(status) {
+      if (status === "yes" || status === "only") return "badge-halal";
+      return "badge-likely";
     }
 
     function escHtml(str) {
