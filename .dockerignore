@@ -2,5 +2,8 @@ node_modules
 npm-debug.log
 .git
 .gitignore
+.github
 README.md
+context.md
+server-setup
 .DS_Store
