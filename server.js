@@ -10,6 +10,8 @@ var PORT = process.env.PORT || 3000;
 app.use(express.static(path.join(__dirname, "public")));
 app.use(express.json());
 
+// AI Agent routes (proxy to Python agent-service)
+require("./ai-routes")(app);
 // ─── Overpass API mirrors (fallback chain) ─────────────────────────────
 var OVERPASS_ENDPOINTS = [
   "https://overpass.kumi.systems/api/interpreter",
