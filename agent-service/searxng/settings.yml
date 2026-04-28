@@ -1,0 +1,53 @@
+use_default_settings: true
+
+general:
+  instance_name: "HalalGuideSG Search"
+  debug: false
+  privacypolicy_url: false
+  donation_url: false
+  enable_metrics: false
+
+search:
+  safe_search: 0
+  autocomplete: ""
+  default_lang: "en"
+  formats:
+    - html
+    - json
+
+server:
+  secret_key: "halal-guide-sg-searxng-internal-2026"
+  bind_address: "0.0.0.0"
+  port: 8888
+  limiter: false
+  image_proxy: true
+  method: "GET"
+
+ui:
+  static_use_hash: true
+  default_theme: simple
+
+engines:
+  - name: google
+    engine: google
+    shortcut: g
+    disabled: false
+  - name: bing
+    engine: bing
+    shortcut: b
+    disabled: false
+  - name: duckduckgo
+    engine: duckduckgo
+    shortcut: ddg
+    disabled: false
+  - name: wikipedia
+    engine: wikipedia
+    shortcut: wp
+    disabled: false
+
+outgoing:
+  request_timeout: 10
+  max_request_timeout: 15
+  useragent_suffix: "HalalGuideSG/1.0"
+  pool_connections: 100
+  pool_maxsize: 20
