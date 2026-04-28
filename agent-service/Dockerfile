@@ -14,6 +14,8 @@ RUN groupadd -r appuser && useradd -r -g appuser -d /app -s /sbin/nologin appuse
     chown -R appuser:appuser /app
 USER appuser
 
+ENV PYTHONUNBUFFERED=1
+
 EXPOSE 5000
 
 HEALTHCHECK --interval=60s --timeout=10s --retries=3 --start-period=30s \

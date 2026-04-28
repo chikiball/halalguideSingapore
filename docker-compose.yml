@@ -55,6 +55,7 @@ services:
       - OLLAMA_URL=http://ollama:11434
       - SEARXNG_URL=http://searxng:8080
       - NOMINATIM_URL=https://nominatim.openstreetmap.org
+      - PYTHONUNBUFFERED=1
     networks:
       - server-net
     depends_on:
