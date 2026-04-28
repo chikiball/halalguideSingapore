@@ -18,7 +18,7 @@ search:
 server:
   secret_key: "halal-guide-sg-searxng-internal-2026"
   bind_address: "0.0.0.0"
-  port: 8888
+  port: 8080
   limiter: false
   image_proxy: true
   method: "GET"

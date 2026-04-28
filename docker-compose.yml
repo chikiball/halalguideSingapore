@@ -53,7 +53,7 @@ services:
     environment:
       # Ollama runs in the chatui stack as container "ollama" on server-net
       - OLLAMA_URL=http://ollama:11434
-      - SEARXNG_URL=http://searxng:8888
+      - SEARXNG_URL=http://searxng:8080
       - NOMINATIM_URL=https://nominatim.openstreetmap.org
     networks:
       - server-net
@@ -81,20 +81,21 @@ services:
       start_period: 60s
 
   # ─── 3. SearXNG (Self-hosted search engine) ──────────────────
+  # SearXNG default port is 8080 — we use that instead of fighting it.
+  # Config files are mounted WITHOUT a named volume to avoid shadowing.
   searxng:
     image: searxng/searxng:latest
     container_name: searxng
     restart: unless-stopped
     expose:
-      - "8888"
+      - "8080"
     networks:
       - server-net
     volumes:
-      - ./agent-service/searxng/settings.yml:/etc/searxng/settings.yml:ro
-      - ./agent-service/searxng/limiter.toml:/etc/searxng/limiter.toml:ro
-      - searxng-data:/etc/searxng
+      - ./agent-service/searxng/settings.yml:/etc/searxng/settings.yml
+      - ./agent-service/searxng/limiter.toml:/etc/searxng/limiter.toml
     environment:
-      - SEARXNG_BASE_URL=http://searxng:8888
+      - SEARXNG_BASE_URL=http://searxng:8080
       - INSTANCE_NAME=HalalGuideSG
     deploy:
       resources:
@@ -102,14 +103,11 @@ services:
           memory: 512m
           cpus: '0.5'
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8888/healthz"]
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/healthz"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 15s
-
-volumes:
-  searxng-data:
 
 networks:
   server-net:
