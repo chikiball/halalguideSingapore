@@ -1,4 +1,11 @@
+# ═══════════════════════════════════════════════════════════════
+# Halal Guide Singapore — Full Stack Docker Compose
+# 3 services: app (Node.js) + agent (Python) + searxng (search)
+# All on server-net, no exposed host ports
+# ═══════════════════════════════════════════════════════════════
+
 services:
+  # ─── 1. Main Web App (Node.js + Express) ──────────────────────
   app:
     build: .
     container_name: halalguideSingapore
@@ -8,9 +15,13 @@ services:
     environment:
       - PORT=3000
       - NODE_ENV=production
+      - AGENT_URL=http://halal-agent:5000
     networks:
       - server-net
-    # ─── Security hardening ───
+    depends_on:
+      agent:
+        condition: service_healthy
+    # Security hardening
     read_only: true
     tmpfs:
       - /tmp
@@ -29,6 +40,75 @@ services:
       timeout: 10s
       retries: 3
       start_period: 30s
+
+  # ─── 2. AI Agent Service (Python + FastAPI) ───────────────────
+  agent:
+    build: ./agent-service
+    container_name: halal-agent
+    restart: unless-stopped
+    expose:
+      - "5000"
+    environment:
+      - OLLAMA_URL=http://host.docker.internal:11434
+      - SEARXNG_URL=http://searxng:8888
+      - NOMINATIM_URL=https://nominatim.openstreetmap.org
+    networks:
+      - server-net
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      searxng:
+        condition: service_healthy
+    # Security hardening
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+          cpus: '1.0'
+        reservations:
+          memory: 256m
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:5000/health"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # ─── 3. SearXNG (Self-hosted search engine) ──────────────────
+  searxng:
+    image: searxng/searxng:latest
+    container_name: searxng
+    restart: unless-stopped
+    expose:
+      - "8888"
+    networks:
+      - server-net
+    volumes:
+      - ./agent-service/searxng/settings.yml:/etc/searxng/settings.yml:ro
+      - ./agent-service/searxng/limiter.toml:/etc/searxng/limiter.toml:ro
+      - searxng-data:/etc/searxng
+    environment:
+      - SEARXNG_BASE_URL=http://searxng:8888
+      - INSTANCE_NAME=HalalGuideSG
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+          cpus: '0.5'
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8888/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  searxng-data:
 
 networks:
   server-net:
