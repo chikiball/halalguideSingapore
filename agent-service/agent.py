@@ -187,7 +187,7 @@ Search results:
         for i, item in enumerate(extracted[:10]):
             print(f"    [{i+1}] {item.get('name', '?')} | {item.get('address', 'no address')}")
 
-        # 5. Geocode each extracted place
+        # 5. Geocode each extracted place (multi-strategy)
         places = []
         for item in extracted[:25]:  # cap at 25 to limit geocoding time
             name = item.get("name", "").strip()
@@ -195,22 +195,53 @@ Search results:
             if not name:
                 continue
 
-            # Try geocoding with full address, fall back to name + Singapore
-            query = f"{name}, {address}" if address else f"{name}, Singapore"
-            geo = await self.geocoder.geocode(query)
+            # Clean address: remove unit numbers (#01-03), extra whitespace
+            import re as _re
+            clean_addr = _re.sub(r"#\w+-\w+[,\s]*", "", address).strip()
+            clean_addr = _re.sub(r"\s*,\s*,", ",", clean_addr).strip(", ")
 
-            if geo:
-                place = {
-                    "name": name,
-                    "lat": geo["lat"],
-                    "lng": geo["lng"],
-                    "address": address or geo.get("display_name", ""),
-                    "type": item.get("type", "restaurant"),
-                    "cuisine": item.get("cuisine", ""),
-                    "halalStatus": "unverified",  # will be updated in Phase 2
-                    "source": "ai_agent",
-                }
-                places.append(place)
+            # Extract postal code if present (Singapore: 6 digits)
+            postal = ""
+            postal_match = _re.search(r"\b(\d{6})\b", address)
+            if postal_match:
+                postal = postal_match.group(1)
+
+            # Try multiple geocoding strategies (first success wins)
+            geo = None
+            strategies = [
+                # Strategy 1: address only (without restaurant name)
+                clean_addr if clean_addr else None,
+                # Strategy 2: just postal code + Singapore
+                f"Singapore {postal}" if postal else None,
+                # Strategy 3: street name + Singapore
+                _re.split(r",", clean_addr)[0] + ", Singapore" if clean_addr else None,
+                # Strategy 4: restaurant name + area
+                f"{name}, Singapore",
+            ]
+
+            for strategy in strategies:
+                if not strategy:
+                    continue
+                geo = await self.geocoder.geocode(strategy)
+                if geo:
+                    print(f"  📍 Geocoded: '{name}' via '{strategy[:50]}' → {geo['lat']:.4f}, {geo['lng']:.4f}")
+                    break
+
+            if not geo:
+                print(f"  ❌ Could not geocode: '{name}' (tried {sum(1 for s in strategies if s)} strategies)")
+                continue
+
+            place = {
+                "name": name,
+                "lat": geo["lat"],
+                "lng": geo["lng"],
+                "address": address or geo.get("display_name", ""),
+                "type": item.get("type", "restaurant"),
+                "cuisine": item.get("cuisine", ""),
+                "halalStatus": "unverified",  # will be updated in Phase 2
+                "source": "ai_agent",
+            }
+            places.append(place)
 
         # 6. Filter by radius + deduplicate
         places = self.geocoder.filter_by_radius(places, lat, lng, radius)
