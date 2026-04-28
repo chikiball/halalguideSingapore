@@ -195,10 +195,18 @@ Search results:
             if not name:
                 continue
 
-            # Clean address: remove unit numbers (#01-03), extra whitespace
+            # Clean address for geocoding
             import re as _re
-            clean_addr = _re.sub(r"#\w+-\w+[,\s]*", "", address).strip()
-            clean_addr = _re.sub(r"\s*,\s*,", ",", clean_addr).strip(", ")
+            clean_addr = address
+            # Replace "Blk" / "Block" with number only (SG HDB notation)
+            clean_addr = _re.sub(r"\b[Bb]l(?:oc)?k\.?\s*", "", clean_addr)
+            # Remove unit numbers (#01-03, #B1-15/16)
+            clean_addr = _re.sub(r"#[\w/]+-[\w/]+[,\s]*", "", clean_addr)
+            # Remove "No." prefix
+            clean_addr = _re.sub(r"\bNo\.?\s*", "", clean_addr)
+            # Collapse multiple commas and whitespace
+            clean_addr = _re.sub(r"\s*,\s*,", ",", clean_addr)
+            clean_addr = _re.sub(r"\s{2,}", " ", clean_addr).strip(", ")
 
             # Extract postal code if present (Singapore: 6 digits)
             postal = ""
