@@ -1,6 +1,6 @@
 # Halal Guide Singapore — Project Context
 
-> Last updated: 2026-04-28
+> Last updated: 2026-04-29
 > Repo: `https://github.com/chikiball/halalguideSingapore.git`
 > Local: `/Users/nandha_handharu/Documents/Nandha/GitHub/halalguideSingapore`
 > Server: `/home/nandha/server/sites/halalguideSingapore` (Ubuntu home server)
@@ -10,7 +10,10 @@
 
 ## 1. What This Is
 
-A mobile-friendly web app that helps users discover halal and Muslim-friendly food establishments near them in Singapore. Uses GPS or tap-to-pick location, queries OpenStreetMap via Overpass API for nearby food places, filters for halal/Muslim-friendly matches, and provides detailed info with web-crawled articles and images when a place is tapped.
+A mobile-friendly web app that helps users discover halal and Muslim-friendly food establishments near them in Singapore. Features **two search modes**:
+
+- **Quick Search (OSM)** — fast, uses OpenStreetMap Overpass API (~2s)
+- **AI Search (LLM)** — uses a local AI agent (Ollama llama3.1 + SearXNG) to search the web, research each restaurant, classify halal status, and write articles (~30s-2min)
 
 ---
 
@@ -20,11 +23,13 @@ A mobile-friendly web app that helps users discover halal and Muslim-friendly fo
 |---|---|
 | 📍 GPS Location | Browser Geolocation API, falls back to Singapore center |
 | 🗺️ Pick on Map | Tap map to drop a draggable pin (no GPS needed) |
-| 🔍 Halal Search | Overpass API → fetch all food places → server-side halal filter |
-| 🃏 Card Results | Sorted by distance, badges for certified vs Muslim-friendly |
-| 📰 Detail Modal | Tap card → shimmer loading → crawled article + image gallery |
+| 🔍 Quick Search (OSM) | Overpass API → fetch all food places → server-side halal filter |
+| 🤖 AI Search (LLM) | SearXNG web search → Ollama llama3.1 → classify + write articles |
+| 🃏 Card Results | Sorted by distance, progressive rendering via SSE streaming |
+| 📰 Detail Modal | Tap card → shimmer loading → AI-written article + image gallery |
+| ☪️ 7 Halal Categories | Certified, Muslim Owned, No Pork No Lard, Halal Friendly, Vegetarian, Vegan, Unverified |
 | 🧭 Directions | One-tap Google Maps navigation |
-| 💾 Caching | In-memory cache for crawled details (no re-crawl on 2nd tap) |
+| 💾 Caching | In-memory cache per phase (no re-search/re-research on 2nd tap) |
 
 ---
 
@@ -32,13 +37,16 @@ A mobile-friendly web app that helps users discover halal and Muslim-friendly fo
 
 | Layer | Technology |
 |---|---|
-| Backend | Node.js + Express (ES5 syntax for Node 12+ compat) |
-| Frontend | Vanilla HTML/CSS/JS — single file (`public/index.html`) |
+| Frontend | Vanilla HTML/CSS/JS — `index.html` + `ai-search.js` |
+| Backend (web) | Node.js + Express |
+| Backend (AI) | Python + FastAPI + LangChain |
+| LLM | Ollama running llama3.1:latest (8B, shared from chatui stack) |
+| Search Engine | SearXNG (self-hosted, aggregates Google/Bing/DuckDuckGo) |
 | Map | Leaflet.js + OpenStreetMap tiles (free, no API key) |
-| Data | Overpass API (OpenStreetMap) with 3 mirror fallback |
-| Crawling | Wikipedia API + DuckDuckGo + website scraping (cheerio) |
-| Deploy (primary) | Home server: Docker + Nginx + Cloudflare Tunnel |
-| Deploy (backup) | fly.io (Singapore `sin` region) |
+| OSM Data | Overpass API with 3 mirror fallback |
+| Geocoding | Nominatim (free, OpenStreetMap) |
+| Web Crawling | httpx + BeautifulSoup (Python) / cheerio (Node.js legacy) |
+| Deploy | Docker Compose (3 containers) + Nginx + Cloudflare Tunnel |
 
 ---
 
@@ -46,25 +54,48 @@ A mobile-friendly web app that helps users discover halal and Muslim-friendly fo
 
 ```
 halalguideSingapore/
-├── server.js              # Express app: /api/halal + /api/place/details routes
-├── crawler.js             # Web crawler: Wikipedia, DuckDuckGo, website scraping
+├── server.js              # Express app: /api/halal + /api/place/details
+├── ai-routes.js           # Express routes: /api/ai/* → proxy SSE to agent
+├── crawler.js             # Legacy web crawler (Wikipedia, DuckDuckGo, cheerio)
 ├── public/
-│   └── index.html         # Single-page frontend: map, cards, modal, pick-on-map
-├── server-setup/          # ← deployment configs for self-hosted Ubuntu server
+│   ├── index.html         # Main frontend: map, cards, modal, pick-on-map
+│   └── ai-search.js       # AI search module: SSE streaming, AI cards, badges
+│
+├── agent-service/         # ← Python AI agent microservice
+│   ├── main.py            # FastAPI: /search (SSE), /place/details (SSE), /health
+│   ├── agent.py           # HalalAgent: 3-phase pipeline (550 lines)
+│   ├── tools/
+│   │   ├── search.py      # SearXNG web + image search (249 lines)
+│   │   ├── scraper.py     # Web scraper + MUIS checker (348 lines)
+│   │   ├── geocoder.py    # Nominatim geocoder with rate limiting (219 lines)
+│   │   ├── image_finder.py # Image search + website extraction (300 lines)
+│   │   └── halal_classifier.py # 7 halal categories + badge config (79 lines)
+│   ├── prompts/
+│   │   ├── discovery.txt  # System prompt for Phase 1 (find restaurants)
+│   │   ├── research.txt   # System prompt for Phase 2 (classify halal)
+│   │   └── article.txt    # System prompt for Phase 3 (write articles)
+│   ├── searxng/
+│   │   ├── settings.yml   # SearXNG config (Google, Bing, DDG, port 8080)
+│   │   └── limiter.toml   # Disable rate limiting (internal use)
+│   ├── Dockerfile         # python:3.11-slim, non-root, PYTHONUNBUFFERED=1
+│   ├── requirements.txt   # langchain, fastapi, httpx, bs4, sse-starlette
+│   └── .dockerignore
+│
+├── server-setup/
 │   ├── nginx/
-│   │   └── halalguideSingapore.conf  # Reverse proxy: proxy_pass :3000
+│   │   └── halalguideSingapore.conf  # Nginx: SSE proxy (no buffering, 180s timeout)
 │   └── scripts/
-│       └── update-deploy-files.sh    # Updates Dockerfile + fly.toml + .dockerignore
-├── .github/
-│   └── workflows/
-│       └── fly-deploy.yml # GitHub Actions CI for Fly.io
+│       ├── deploy-ai.sh              # Full deployment: preflight → build → test
+│       └── update-deploy-files.sh    # Updates Dockerfile, fly.toml, .dockerignore
+│
+├── setup-agent-service.sh # Creates agent-service stubs (run once, first time only)
+├── setup-step10.sh        # Patches server.js + index.html for AI routes
+│
+├── docker-compose.yml     # 3 services: app + agent + searxng
+├── Dockerfile             # node:18-alpine, non-root, curl healthcheck
 ├── package.json           # express, node-fetch, cheerio
-├── package-lock.json
-├── Dockerfile             # node:18-alpine, non-root appuser, curl healthcheck
-├── docker-compose.yml     # App container (joins server-net, exposes 3000 internally)
-├── fly.toml               # Fly.io config: sin region, 512 MB, auto-stop
-├── .dockerignore
-├── .gitignore             # ignores node_modules, .env, .DS_Store
+├── fly.toml               # Fly.io: sin region, 512MB (backup deploy)
+├── .gitignore
 ├── README.md
 └── context.md             # ← this file
 ```
@@ -73,194 +104,238 @@ halalguideSingapore/
 
 ## 5. API Endpoints
 
+### Node.js (server.js + ai-routes.js)
+
 | Method | Path | Description |
 |---|---|---|
 | GET | `/` | Serves `public/index.html` |
-| GET | `/api/halal?lat=&lng=&radius=` | Search halal places via Overpass API |
-| POST | `/api/place/details` | Crawl web for details, images, compose article |
+| GET | `/api/halal?lat=&lng=&radius=` | OSM search via Overpass API |
+| POST | `/api/place/details` | Legacy web crawl (cheerio) |
+| POST | `/api/ai/search` | AI search → SSE stream of places |
+| POST | `/api/ai/place/details` | AI research + article → SSE stream |
+| GET | `/api/ai/health` | Agent service health check |
+
+### Python Agent (main.py)
+
+| Method | Path | Description |
+|---|---|---|
+| POST | `/search` | Phase 1: discover places (SSE) |
+| POST | `/place/details` | Phase 2+3: research + article (SSE) |
+| GET | `/health` | Health check + config info |
 
 ---
 
-## 6. Halal Detection Logic
+## 6. AI Agent — 3-Phase Pipeline
+
+### Phase 1: Discovery (~30s)
+
+```
+reverse_geocode(lat, lng) → "Bugis"
+    ↓
+12 parallel SearXNG searches:
+  - halal certified, halal, Muslim owned, Muslim friendly
+  - no pork no lard, vegetarian/vegan
+  - Malay/Indonesian, Middle Eastern/Arab/Turkish, Indian/Pakistani
+  - area-specific queries using geocoded area name
+    ↓
+LLM (llama3.1) extracts restaurant names + addresses from search results
+  (fallback: regex extraction if LLM fails)
+    ↓
+Multi-strategy geocoding per restaurant:
+  1. Clean address (strip Blk, #unit, No.)
+  2. Postal code only ("Singapore 208859")
+  3. Street name + Singapore
+  4. Restaurant name + Singapore
+    ↓
+Filter by radius → deduplicate → return places
+```
+
+### Phase 2: Research (~15s per restaurant)
+
+```
+7 targeted SearXNG searches per restaurant:
+  general, halal cert, pork/lard, Muslim owned, menu, reviews, vegan
+    ↓
+Scrape top 8 URLs (parallel, 5 concurrent max)
+    ↓
+Check MUIS halal certification directory
+    ↓
+LLM classifies halal status (7 categories) with confidence level
+    ↓
+Extract: cuisine, price range, dishes, hours, phone, website
+```
+
+### Phase 3: Article (~5s)
+
+```
+LLM writes 150-250 word article grounded in Phase 2 evidence only
+    ↓
+Returns: {title, article, tags, images, classification}
+```
+
+---
+
+## 7. Halal Classification Categories (AI mode)
+
+| Status | Label | Icon | Badge Color | Criteria |
+|---|---|---|---|---|
+| `halal_certified` | Halal Certified | ☪️ | Green | MUIS certificate evidence found |
+| `muslim_owned` | Muslim Owned | 🟢 | Green | Owner confirmed Muslim, no cert |
+| `no_pork_no_lard` | No Pork No Lard | 🚫🐷 | Blue | Explicitly stated, not certified |
+| `halal_friendly` | Halal Friendly | 🔵 | Blue | Offers halal options, not fully halal |
+| `vegetarian` | Vegetarian | 🌿 | Teal | No meat at all |
+| `vegan` | Vegan | 🌱 | Teal | No animal products at all |
+| `unverified` | Unverified | ⚪ | Gray | Insufficient evidence |
+
+Confidence levels: `high` (MUIS cert found), `medium` (consistent mentions), `low` (1-2 mentions)
+
+---
+
+## 8. Halal Detection Logic (OSM mode, legacy)
 
 ### Data source: Overpass API (OpenStreetMap)
 
-The app fetches ALL food establishments within radius, then filters server-side using these heuristics:
+Fetches ALL food establishments within radius, filters server-side:
 
-### Explicit tags (confirmed halal)
-- `diet:halal = yes | only | limited`
-- `halal = yes`
+- **Explicit tags:** `diet:halal = yes | only | limited`, `halal = yes`
+- **Cuisine match:** halal, malay, indonesian, middle_eastern, arab, turkish, etc.
+- **Name match:** halal, muslim, nasi, mee, roti, prata, murtabak, satay, etc.
 
-### Inferred (Muslim-friendly)
-- **Cuisine match:** halal, malay, indonesian, middle_eastern, arab, turkish, pakistani, persian, afghan, bangladeshi, lebanese, indian, kebab, shawarma, falafel, mediterranean
-- **Name match:** halal, muslim, nasi, mee, roti, prata, briyani, biryani, murtabak, satay, rendang, ayam, kambing, padang, warung, mamak, tandoori, kebab, shawarma, naan, soto, laksa, mee goreng, nasi lemak, teh tarik
-- **Brand/operator match:** same keywords
-
-### Badge system
-| Status | Badge | Meaning |
-|---|---|---|
-| `yes` / `only` | ☪ Halal ✓ (green) | OSM tagged as halal |
-| `likely` | 🟢 Muslim-Friendly (blue) | Inferred from cuisine/name |
+Badge system: ☪ Halal ✓ (tagged) or 🟢 Muslim-Friendly (inferred)
 
 ---
 
-## 7. Overpass API Mirrors (Fallback Chain)
-
-The primary `overpass-api.de` frequently returns 504. The server tries in order:
-
-1. `https://overpass.kumi.systems/api/interpreter`
-2. `https://maps.mail.ru/osm/tools/overpass/api/interpreter`
-3. `https://overpass-api.de/api/interpreter`
-
-Each mirror gets 25s timeout before failing to the next.
-
----
-
-## 8. Web Crawler (`crawler.js`)
-
-### Sources (all free, no API keys)
-
-| Source | What it fetches | Timeout |
-|---|---|---|
-| Wikipedia API | Article summary + thumbnail image | 8s |
-| DuckDuckGo Instant Answer | Abstract, image, related topics | 8s |
-| Website scrape (if URL in OSM) | og:image, meta description, hero images | 6s |
-| DuckDuckGo HTML search | Review snippets from web results | 8s |
-
-All 4 sources run in **parallel** (Promise.all).
-
-### Article composer
-
-Generates a warm, inviting write-up from crawled data:
-1. Random warm opening referencing the place name
-2. Cuisine description (if available)
-3. Halal status note (certified vs inferred)
-4. "What People Say" section (best 3 web snippets as blockquotes)
-5. Address + hours
-6. Random warm closing
-
-### Image priority
-1. Website og:image / hero images
-2. Wikipedia thumbnail / original image
-3. DuckDuckGo image
-4. **Fallback:** Cuisine-based Unsplash photo (malay, indian, turkish, etc.)
-
-### Caching
-In-memory object, keyed by `name_lat_lng`. No TTL — lasts until server restart.
-
----
-
-## 9. Frontend (`public/index.html`)
-
-### Single-page app, 3 states:
-
-| State | What's shown |
-|---|---|
-| **Landing** | "Use My Location" + "Choose on Map" buttons |
-| **Main** | Map + location toggle + radius selector + cards |
-| **Detail modal** | Header → gallery → quick info → article → sources → actions |
-
-### Location modes
-- **GPS mode:** Blue dot marker, uses browser geolocation
-- **Pick mode:** Crosshair cursor, tap to place draggable red pin, banner hint
-
-### Design
-- Font: Inter (Google Fonts)
-- Primary: `#1a6b4a` (green)
-- Mobile-first, responsive grid (1/2/3 columns)
-- Card radius: 16px, bottom-sheet modal
-- Shimmer animation while crawling
-
----
-
-## 10. Deployment
-
-### 10A. Self-Hosted Ubuntu Server (primary)
-
-- **Server:** Ubuntu home server at `/home/nandha/server/`
-- **Domain:** `nandharu.uk` (Cloudflare)
-- **Live URL:** https://halal.nandharu.uk
-- **Architecture:** Cloudflare Tunnel → Nginx → Docker containers
-
-#### Traffic flow
+## 9. Docker Architecture (3 containers + shared Ollama)
 
 ```
 Visitor → https://halal.nandharu.uk
     │
     ▼
 ┌──────────────────────────────┐
-│  Cloudflare Edge (SIN)       │  HTTPS termination, DDoS, WAF
+│  Cloudflare Edge (SIN)       │
 └──────────┬───────────────────┘
-           │  encrypted tunnel
-           ▼
-┌──────────────────────────────┐
-│  cloudflare-tunnel           │  cloudflare/cloudflared:latest
-│  network: server-net         │  shared with aidatajakarta
+           │  tunnel
+┌──────────▼───────────────────┐
+│  nginx-gateway               │
+│  ├─ /          → app:3000    │
+│  ├─ /api/halal → app:3000   │ (30s timeout)
+│  ├─ /api/ai/*  → app:3000   │ (180s, no buffering, SSE)
+│  └─ /api/place → app:3000   │ (30s timeout)
 └──────────┬───────────────────┘
-           │  http://nginx-gateway:80
-           ▼
-┌──────────────────────────────┐
-│  nginx-gateway               │  nginx:alpine
-│  server_name halal.nandharu.uk │  rate limiting, gzip
-└──────────┬───────────────────┘
-           │  http://halalguideSingapore:3000
-           ▼
-┌──────────────────────────────┐
-│  halalguideSingapore         │  node:18-alpine, non-root
-│  network: server-net         │  expose 3000 (internal only)
-│  read_only: true             │  512 MB RAM, 0.5 CPU
-└──────────────────────────────┘
+           │
+    ┌──────┼──────────┐
+    │      │          │
+┌───▼──┐ ┌─▼────┐ ┌──▼─────┐ ┌────────┐
+│ app  │→│agent │→│searxng │ │ ollama │ ← from chatui stack
+│:3000 │ │:5000 │ │:8080   │ │:11434  │
+│512MB │ │1GB   │ │512MB   │ │8GB     │
+└──────┘ └──────┘ └────────┘ └────────┘
+         all on server-net (Docker)
 ```
 
-#### docker-compose.yml (in repo root)
+### Key config details
 
-```yaml
-services:
-  app:
-    build: .
-    container_name: halalguideSingapore
-    restart: unless-stopped
-    expose:
-      - "3000"
-    environment:
-      - PORT=3000
-      - NODE_ENV=production
-    networks:
-      - server-net
-    read_only: true
-    tmpfs:
-      - /tmp
-    security_opt:
-      - no-new-privileges:true
-    deploy:
-      resources:
-        limits:
-          memory: 512m
-          cpus: '0.5'
-    healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:3000/"]
-      interval: 60s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
+| Service | Container Name | Port | Memory | CPU |
+|---|---|---|---|---|
+| app (Node.js) | halalguideSingapore | 3000 | 512MB | 0.5 |
+| agent (Python) | halal-agent | 5000 | 1GB | 1.0 |
+| searxng | searxng | 8080 | 512MB | 0.5 |
+| ollama | ollama | 11434 | 8GB | 4.0 |
 
-networks:
-  server-net:
-    external: true
+- **Ollama is NOT in this docker-compose** — it runs in the chatui stack (`/home/nandha/server/sites/chatui/`) on the shared `server-net`
+- Agent reaches Ollama via `http://ollama:11434` (same Docker network)
+- Model: `llama3.1:latest` (8B, Q4_K_M, ~4.7GB)
+- All services: `read_only: true`, `no-new-privileges`, resource limits
+- `PYTHONUNBUFFERED=1` on agent for real-time Docker logging
+- Startup order: searxng (healthy) → agent (healthy) → app
+
+---
+
+## 10. Frontend
+
+### Two search modes (toggle bar)
+
+| Mode | Button | Speed | Source |
+|---|---|---|---|
+| 🗺️ Quick Search | Default, active | ~2s | OpenStreetMap Overpass API |
+| 🤖 AI Search | Toggle | ~30s-2min | SearXNG → Ollama llama3.1 |
+
+### AI search UX flow
+
+1. User picks location + toggles to 🤖 AI Search + taps Search
+2. Status bar: spinner + "Discovering — Searching for halal restaurants..."
+3. Cards appear progressively as each place is geocoded (SSE streaming)
+4. Cards show "🤖 AI powered — tap for details"
+5. Tap a card → modal opens with shimmer → "Researching..." → "Writing..."
+6. Modal renders: image gallery + article + halal assessment + details
+
+### Files
+
+- `index.html` — main app (map, OSM search, modal, pick-on-map)
+- `ai-search.js` — AI module (injected at runtime, overrides searchHalal())
+  - Adds search mode toggle bar
+  - Consumes SSE streams via ReadableStream API
+  - Renders AI-specific cards with 7 badge types
+  - AI modal with research results, confidence levels, reasoning
+
+### Design
+
+- Font: Inter (Google Fonts)
+- Primary: `#1a6b4a` (green)
+- Mobile-first, responsive grid (1/2/3 columns)
+- Card radius: 16px, bottom-sheet modal
+- Shimmer loading animation
+
+---
+
+## 11. Deployment
+
+### Full AI stack deployment (single command)
+
+```bash
+# Server:
+cd /home/nandha/server/sites/halalguideSingapore
+sudo git pull origin main
+sudo bash server-setup/scripts/deploy-ai.sh
 ```
 
-#### Useful commands
+The `deploy-ai.sh` script:
+1. Pre-flight checks: Docker, Compose, Ollama container, llama3.1 model, server-net
+2. Git pull latest code
+3. Runs setup scripts (agent scaffold, AI routes patch, deploy files)
+4. Copies nginx config + reload
+5. `docker compose up -d --build` (3 containers)
+6. Waits for health checks (searxng → agent → app)
+7. Runs 5 integration tests
+8. Prints container status summary
+
+### Manual deployment
+
+```bash
+cd /home/nandha/server/sites/halalguideSingapore
+sudo git pull origin main
+sudo docker compose up -d --build
+sudo cp server-setup/nginx/halalguideSingapore.conf /home/nandha/server/nginx/conf.d/
+sudo docker exec nginx-gateway nginx -s reload
+```
+
+### Useful commands
 
 | Task | Command |
 |---|---|
-| Deploy / redeploy | `sudo bash /home/nandha/server/scripts/deploy-site.sh halalguideSingapore` |
-| View logs | `cd /home/nandha/server/sites/halalguideSingapore && sudo docker compose logs -f --tail 50` |
-| Restart | `cd /home/nandha/server/sites/halalguideSingapore && sudo docker compose restart` |
-| Force rebuild | `cd /home/nandha/server/sites/halalguideSingapore && sudo docker compose up -d --build --force-recreate` |
-| Reload nginx | `sudo docker exec nginx-gateway nginx -s reload` |
+| Full deploy | `sudo bash .../deploy-ai.sh` |
+| Rebuild agent only | `sudo docker compose up -d --build agent` |
+| Agent logs | `sudo docker logs halal-agent -f --tail 20` |
+| App logs | `sudo docker logs halalguideSingapore -f --tail 20` |
+| SearXNG logs | `sudo docker logs searxng --tail 10` |
+| Test agent | `sudo docker exec halal-agent curl -s http://localhost:5000/health` |
+| Test SearXNG | `sudo docker exec searxng wget -qO- "http://localhost:8080/healthz"` |
+| Test Ollama | `sudo docker exec halal-agent curl -s http://ollama:11434/api/tags` |
+| Restart all | `sudo docker compose restart` |
+| Force rebuild all | `sudo docker compose up -d --build --force-recreate` |
 | Status dashboard | `sudo bash /home/nandha/server/scripts/status.sh` |
 
-#### Cloudflare tunnel config
+### Cloudflare tunnel config
 
 | Field | Value |
 |---|---|
@@ -269,79 +344,55 @@ networks:
 | Type | `HTTP` |
 | URL | `nginx-gateway:80` |
 
-Same tunnel + token as `jakarta.nandharu.uk` — just add another public hostname.
-
 ---
 
-### 10B. Fly.io (backup / alternative)
-
-```bash
-fly auth login
-fly launch        # accept existing fly.toml
-fly deploy
-fly open
-```
-
-- Region: `sin` (Singapore)
-- VM: shared-cpu-1x, 512 MB
-- Auto-stop when idle, auto-start on request
-
----
-
-### 10C. Security (5 layers, same as aidatajakarta)
+## 12. Security (5 layers)
 
 | Layer | Component | What it does |
 |---|---|---|
 | 1. Cloudflare | Edge | DDoS, WAF, SSL, IP hiding, caching |
 | 2. OS | UFW + Fail2Ban | Deny all inbound, SSH hardening |
-| 3. Nginx | Rate limits | 10 req/s general, 5 req/s API, security headers |
-| 4. Docker | Isolation | Non-root, read-only fs, no-new-privileges, 512MB limit |
-| 5. App | Minimal surface | No DB, no uploads, no secrets, 2 GET + 1 POST |
+| 3. Nginx | Rate limits | 10 req/s general, 5 req/s API, SSE: no buffering, 180s timeout |
+| 4. Docker | Isolation | Non-root, read-only fs, no-new-privileges, resource limits |
+| 5. App | Minimal surface | No DB, no uploads, no secrets |
 
 ---
 
-## 11. Deploy Playbook (New Setup)
+## 13. Memory Budget (32GB server)
 
-### On local machine:
-```bash
-cd ~/Documents/Nandha/GitHub/halalguideSingapore
-bash server-setup/scripts/update-deploy-files.sh
-git add -A && git commit -m "Deploy configs" && git push origin main
-```
-
-### On server:
-```bash
-# Clone
-sudo git clone https://github.com/chikiball/halalguideSingapore.git /home/nandha/server/sites/halalguideSingapore
-
-# Copy nginx config
-sudo cp /home/nandha/server/sites/halalguideSingapore/server-setup/nginx/halalguideSingapore.conf /home/nandha/server/nginx/conf.d/
-
-# Build & start
-cd /home/nandha/server/sites/halalguideSingapore
-sudo docker compose up -d --build
-
-# Reload nginx
-sudo docker exec nginx-gateway nginx -s reload
-
-# Verify
-curl -sI https://halal.nandharu.uk | head -5
-```
-
-### In Cloudflare:
-1. Zero Trust → Networks → Connectors → `home-server`
-2. Public Hostname → Add: `halal.nandharu.uk` → HTTP → `nginx-gateway:80`
+| Service | RAM |
+|---|---|
+| Ollama llama3.1:latest | ~8 GB |
+| SearXNG | ~200 MB |
+| Agent service | ~500 MB |
+| Node.js app | ~200 MB |
+| Open WebUI (chatui) | ~1 GB |
+| nginx + tunnel | ~100 MB |
+| aidatajakarta | ~300 MB |
+| **Total** | **~10.3 GB** (leaves ~22 GB for OS) |
 
 ---
 
-## 12. Known Limitations & Future Ideas
+## 14. Known Limitations & Future Ideas
 
-- **OSM data coverage:** Many SG halal places don't have `diet:halal` tag — relies on name/cuisine inference
-- **Wikipedia false matches:** Generic "Singapore" articles may appear for unnamed places
-- **No persistent cache:** Article cache resets on container restart — could add Redis or file cache
-- **Crawl latency:** ~2-4s per place on first tap — could pre-crawl popular places
-- **No user contributions:** Could add a "Suggest a place" feature
-- **No MUIS verification:** Could integrate with Singapore MUIS halal certification database if API available
-- **Image quality:** Fallback Unsplash images are generic — could improve with cuisine-specific search
-- **Consider:** Adding prayer time API integration for nearby mosques
-- **Consider:** Offline mode with service worker for cached results
+### Current limitations
+- **LLM extraction quality:** llama3.1:8b sometimes extracts blog titles instead of restaurant names
+- **Geocoding rate limit:** Nominatim allows 1 req/sec, so 20 restaurants = ~20s
+- **SG address format:** "Blk" prefix and unit numbers confuse Nominatim (partially fixed with regex stripping)
+- **No persistent cache:** AI results reset on container restart
+- **OSM data coverage:** Many SG halal places don't have `diet:halal` tag
+- **Single hawker center issue:** LLM may list all stalls in one food court with same address
+
+### Future improvements
+- **Better LLM prompts:** More examples, stricter name-only extraction
+- **Upgrade to llama3.1:70b:** Better extraction quality (needs ~48GB RAM)
+- **Redis cache:** Persist AI results across restarts
+- **Pre-crawl popular areas:** Cache results for Bugis, Kampong Glam, Geylang Serai
+- **MUIS API integration:** Direct halal certification verification
+- **Prayer time API:** Show nearby mosques with prayer times
+- **User contributions:** "Suggest a place" feature
+- **Offline mode:** Service worker for cached results
+- **Image quality:** SearXNG image search for real restaurant photos
+
+### Setup scripts warning
+⚠️ `setup-agent-service.sh` creates STUB files. Do NOT run it after implementations exist — it overwrites real code with empty stubs. Only run once on first setup.
