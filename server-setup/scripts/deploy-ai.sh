@@ -37,27 +37,32 @@ if ! docker compose version &>/dev/null; then
 fi
 echo "  ✅ Docker Compose $(docker compose version --short)"
 
-# Ollama
-if ! command -v ollama &>/dev/null; then
-  echo "❌ Ollama not found. Install from https://ollama.ai"
+# Ollama (runs as Docker container in chatui stack on server-net)
+if docker ps --format '{{.Names}}' | grep -q "^ollama$"; then
+  echo "  ✅ Ollama container running"
+else
+  echo "❌ Ollama container not found. It should be running in the chatui stack."
+  echo "   Start it: cd /home/nandha/server/sites/chatui && sudo docker compose up -d ollama"
   exit 1
 fi
-echo "  ✅ Ollama $(ollama --version 2>/dev/null || echo 'installed')"
 
 # Check llama3.1 model
-if ! ollama list 2>/dev/null | grep -q "llama3.1"; then
+if docker exec ollama ollama list 2>/dev/null | grep -q "llama3.1"; then
+  echo "  ✅ llama3.1 model available"
+else
   echo "⚠️  llama3.1 not found. Pulling..."
-  ollama pull llama3.1:8b
+  docker exec ollama ollama pull llama3.1:8b
+  echo "  ✅ llama3.1:8b pulled"
 fi
-echo "  ✅ llama3.1:8b model available"
 
-# Check Ollama is running
-if ! curl -sf http://localhost:11434/api/tags &>/dev/null; then
-  echo "⚠️  Ollama not running. Starting..."
-  ollama serve &>/dev/null &
-  sleep 3
+# Verify Ollama API responds on server-net
+if docker exec ollama curl -sf http://localhost:11434/api/tags &>/dev/null; then
+  echo "  ✅ Ollama API responding on :11434"
+else
+  echo "⚠️  Ollama API not responding. Restarting..."
+  cd /home/nandha/server/sites/chatui && docker compose restart ollama
+  sleep 5
 fi
-echo "  ✅ Ollama running on :11434"
 
 # server-net network
 if ! docker network inspect server-net &>/dev/null 2>&1; then
@@ -190,12 +195,12 @@ else
   echo "⚠️ SKIP (internal only, check via: docker exec halal-agent curl http://localhost:5000/health)"
 fi
 
-# Test 5: Ollama
+# Test 5: Ollama (Docker container from chatui stack)
 echo -n "  [5/5] Ollama llama3.1: "
-if curl -sf http://localhost:11434/api/tags | grep -q "llama3.1"; then
+if docker exec ollama ollama list 2>/dev/null | grep -q "llama3.1"; then
   echo "✅ PASS"
 else
-  echo "❌ FAIL — ensure Ollama is running: ollama serve"
+  echo "❌ FAIL — ensure Ollama is running: cd /home/nandha/server/sites/chatui && sudo docker compose up -d ollama"
 fi
 
 # ─── 8. Summary ──────────────────────────────────────────────

@@ -1,7 +1,9 @@
 # ═══════════════════════════════════════════════════════════════
 # Halal Guide Singapore — Full Stack Docker Compose
 # 3 services: app (Node.js) + agent (Python) + searxng (search)
-# All on server-net, no exposed host ports
+#
+# Ollama is NOT here — it runs in the chatui stack at ollama:11434
+# on the shared server-net. No need to duplicate it.
 # ═══════════════════════════════════════════════════════════════
 
 services:
@@ -49,13 +51,12 @@ services:
     expose:
       - "5000"
     environment:
-      - OLLAMA_URL=http://host.docker.internal:11434
+      # Ollama runs in the chatui stack as container "ollama" on server-net
+      - OLLAMA_URL=http://ollama:11434
       - SEARXNG_URL=http://searxng:8888
       - NOMINATIM_URL=https://nominatim.openstreetmap.org
     networks:
       - server-net
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     depends_on:
       searxng:
         condition: service_healthy
