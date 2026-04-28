@@ -184,6 +184,8 @@ Search results:
             extracted = self._regex_extract_places(search_results)
 
         print(f"  🧠 LLM extracted {len(extracted)} places")
+        for i, item in enumerate(extracted[:10]):
+            print(f"    [{i+1}] {item.get('name', '?')} | {item.get('address', 'no address')}")
 
         # 5. Geocode each extracted place
         places = []

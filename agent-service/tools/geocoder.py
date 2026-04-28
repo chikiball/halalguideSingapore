@@ -70,6 +70,7 @@ class GeocoderTool:
                 results = resp.json()
 
             if not results:
+                print(f"  📍 Geocode empty for: '{address}'")
                 return None
 
             r = results[0]
