@@ -17,6 +17,7 @@ app = FastAPI(title="Halal Guide SG Agent", version="1.0.0", docs_url="/docs")
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 SEARXNG_URL = os.getenv("SEARXNG_URL", "http://localhost:8888")
 NOMINATIM_URL = os.getenv("NOMINATIM_URL", "https://nominatim.openstreetmap.org")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.1:latest")
 
 agent: Optional[HalalAgent] = None
 
@@ -28,7 +29,7 @@ async def startup():
         ollama_url=OLLAMA_URL,
         searxng_url=SEARXNG_URL,
         nominatim_url=NOMINATIM_URL,
-        model="llama3.1:8b",
+        model=OLLAMA_MODEL,
     )
     print(f"🤖 Agent ready | Ollama: {OLLAMA_URL} | SearXNG: {SEARXNG_URL}")
 
