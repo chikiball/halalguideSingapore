@@ -151,13 +151,24 @@ class SearchTool:
         radius_km = radius_m / 1000.0
         coord_str = f"{lat:.4f},{lng:.4f}"
 
-        # Core queries — designed to find halal places from different angles
+        # Core queries — cover all Muslim-friendly food categories:
+        # 1. Halal certified (MUIS)
+        # 2. Halal (general)
+        # 3. Muslim owned
+        # 4. No pork no lard
+        # 5. Vegetarian / vegan (safe for Muslim consumption)
+        # 6. Cuisine-based (Malay, Indonesian, Middle Eastern, Indian, Turkish)
         queries = [
+            f"halal certified restaurant near {coord_str} Singapore",
+            f"MUIS halal food near {coord_str} Singapore",
             f"halal restaurant near {coord_str} Singapore",
+            f"Muslim owned restaurant near {coord_str} Singapore",
             f"Muslim friendly food near {coord_str} Singapore",
-            f"halal certified restaurant Singapore near me",
-            f"MUIS halal food {coord_str}",
+            f"no pork no lard restaurant near {coord_str} Singapore",
+            f"vegetarian vegan restaurant near {coord_str} Singapore",
             f"Malay Indonesian food near {coord_str} Singapore",
+            f"Middle Eastern Arab Turkish food near {coord_str} Singapore",
+            f"Indian Pakistani restaurant near {coord_str} Singapore",
         ]
 
         if extra_queries:
@@ -202,9 +213,12 @@ class SearchTool:
         """
         search_map = {
             "general": f"{name} Singapore restaurant",
-            "halal": f"{name} Singapore halal certificate MUIS",
-            "menu": f"{name} Singapore menu prices",
-            "reviews": f"{name} Singapore review",
+            "halal": f"{name} Singapore halal certificate MUIS certified",
+            "pork_lard": f"{name} Singapore no pork no lard",
+            "muslim_owned": f"{name} Singapore Muslim owned",
+            "menu": f"{name} Singapore menu prices food",
+            "reviews": f"{name} Singapore review rating",
+            "vegan": f"{name} Singapore vegetarian vegan plant-based",
         }
 
         if queries_extra:
