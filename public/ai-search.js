@@ -20,6 +20,13 @@
   let aiResearchCache = {};
   let currentPlaces = []; // shared reference to the places array
 
+  // ─── Debug helper — logs to debug panel if active ───
+  function _dbg(tag, message) {
+    if (window.aiDebug && window.aiDebug.log) {
+      window.aiDebug.log(tag, message);
+    }
+  }
+
   // ─── Badge config for AI classifications ───
   const AI_BADGES = {
     halal_certified:  { label: "Halal Certified", icon: "☪️", cls: "badge-halal" },
@@ -144,6 +151,7 @@
       }
 
       // Fetch ALL food places (not just halal-filtered) — AI will classify
+      _dbg("search", `📡 Fetching all food places from OSM (radius ${radius}m)...`);
       const osmRes = await fetch(`/api/halal?lat=${lat}&lng=${lng}&radius=${radius}&all=true`);
       const osmData = await osmRes.json();
 
@@ -156,6 +164,16 @@
         p.distance = window.getDistance ? getDistance(lat, lng, p.lat, p.lng) : 0;
       });
       places.sort((a, b) => a.distance - b.distance);
+
+      // Log ALL OSM results to debug
+      _dbg("search", `📍 OSM found ${places.length} food places within ${radius}m`);
+      _dbg("search", `📋 All ${places.length} food places from OSM:`);
+      places.forEach((p, i) => {
+        const dist = p.distance < 1000 ? Math.round(p.distance) + "m" : (p.distance / 1000).toFixed(1) + "km";
+        const cuisine = p.cuisine ? ` [${p.cuisine}]` : "";
+        const type = p.type || "?";
+        _dbg("search", `  ${i + 1}. ${p.name} (${dist}) — ${type}${cuisine}`);
+      });
 
       if (places.length === 0) {
         emptyState.classList.add("active");
@@ -201,14 +219,22 @@
       }
 
       // ───── STEP 3: AI research on each place (background) ─────
+      _dbg("phase", `🔬 Starting AI research on ${places.length} places...`);
       let researchedCount = 0;
       const researchPromises = places.map(async (place, i) => {
         try {
+          _dbg("research", `🔬 [${i + 1}/${places.length}] Researching: ${place.name}...`);
           const result = await researchPlace(place);
           researchedCount++;
 
           // Update card badge
           if (result && result.classification) {
+            const cls = result.classification;
+            const badge = AI_BADGES[cls.status] || AI_BADGES.unverified;
+            _dbg("research", `✅ [${i + 1}] ${place.name} → ${badge.icon} ${badge.label} (${cls.confidence || "?"} confidence)`);
+          } else {
+            _dbg("research", `⚪ [${i + 1}] ${place.name} → no classification`);
+          }
             updateCardBadge(i, result.classification);
           }
 
