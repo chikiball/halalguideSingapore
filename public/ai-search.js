@@ -1,21 +1,24 @@
 /**
- * AI Search Module — Step 10
- * Handles AI-powered search via SSE streaming.
+ * AI Search Module — Hybrid Approach
  *
- * Loaded after the main index.html script.
- * Adds: search mode toggle, SSE consumption, progressive card rendering,
- *       AI-specific badges, and research/article streaming in modal.
+ * Single search flow: OSM (Overpass) for geographic discovery + AI for research.
+ * No mode toggle — just one Search button.
  *
- * Requires: the main app's global functions (escHtml, openModal, etc.)
+ * Flow:
+ *   1. User taps Search → pulsating ✨ "AI is performing search for halal food"
+ *   2. Overpass API finds restaurants with real coordinates (~2s)
+ *   3. Cards appear on map immediately
+ *   4. AI agent researches each place in background (classification, article)
+ *   5. Cards update progressively with halal badges
+ *   6. Tap card → full AI article + details
  */
 
 (function () {
   "use strict";
 
   // ─── State ───
-  let searchMode = "ai"; // "osm" or "ai" — default to AI
-  let aiPlaces = [];
   let aiResearchCache = {};
+  let currentPlaces = []; // shared reference to the places array
 
   // ─── Badge config for AI classifications ───
   const AI_BADGES = {
@@ -28,65 +31,32 @@
     unverified:       { label: "Unverified", icon: "⚪", cls: "badge-unverified" },
   };
 
-  // ─── Inject additional CSS ───
+  // ─── Inject CSS ───
   const style = document.createElement("style");
   style.textContent = `
-    .search-mode-bar {
-      display: flex;
-      gap: 0;
-      padding: 8px 20px 0;
-    }
-    .mode-toggle {
-      flex: 1;
-      padding: 8px 12px;
-      border: 2px solid #e0e0e0;
-      background: #fff;
-      color: #5a5a7a;
-      font-size: 12px;
-      font-weight: 600;
-      font-family: inherit;
-      cursor: pointer;
-      transition: all 0.2s;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 5px;
-    }
-    .mode-toggle:first-child { border-radius: 8px 0 0 8px; border-right: none; }
-    .mode-toggle:last-child { border-radius: 0 8px 8px 0; }
-    .mode-toggle.active { background: #1a6b4a; color: white; border-color: #1a6b4a; }
-    .mode-toggle .mode-tag {
-      font-size: 9px;
-      padding: 1px 5px;
-      border-radius: 8px;
-      background: rgba(255,255,255,0.2);
-    }
-    .mode-toggle:not(.active) .mode-tag { background: #f0f0f0; color: #888; }
-
-    .ai-status {
-      padding: 8px 20px;
-      font-size: 13px;
-      color: #5a5a7a;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    .ai-status .ai-spinner {
-      width: 16px; height: 16px;
-      border: 2px solid #e8f5ee;
-      border-top-color: #1a6b4a;
-      border-radius: 50%;
-      animation: spin 0.8s linear infinite;
-    }
-    .ai-status .phase-label {
-      font-weight: 600;
-      color: #1a6b4a;
-    }
-
     .badge-vegan { background: #e0f2f1; color: #00695c; }
     .badge-unverified { background: #f5f5f5; color: #9e9e9e; }
 
-    .card-ai-status {
+    .ai-loading-bar {
+      padding: 12px 20px;
+      font-size: 14px;
+      color: #1a6b4a;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .ai-loading-bar .pulse {
+      display: inline-block;
+      animation: aiPulse 1.2s ease-in-out infinite;
+      font-size: 20px;
+    }
+    @keyframes aiPulse {
+      0%, 100% { opacity: 0.4; transform: scale(0.9); }
+      50% { opacity: 1; transform: scale(1.2); }
+    }
+
+    .card-research-status {
       font-size: 11px;
       color: #5a5a7a;
       margin-top: 4px;
@@ -94,13 +64,10 @@
       align-items: center;
       gap: 4px;
     }
-    .card-ai-status .mini-spinner {
-      width: 12px; height: 12px;
-      border: 2px solid #e0e0e0;
-      border-top-color: #1a6b4a;
-      border-radius: 50%;
-      animation: spin 0.8s linear infinite;
+    .card-research-status .mini-pulse {
       display: inline-block;
+      animation: aiPulse 1.2s ease-in-out infinite;
+      font-size: 12px;
     }
 
     .ai-article-section {
@@ -139,45 +106,10 @@
   `;
   document.head.appendChild(style);
 
-  // ─── Inject search mode toggle into DOM ───
-  function injectSearchModeToggle() {
-    const controls = document.querySelector(".controls");
-    if (!controls || document.getElementById("searchModeBar")) return;
+  // ─── Override searchHalal with hybrid approach ───
+  const _origSearchHalal = window.searchHalal;
 
-    const bar = document.createElement("div");
-    bar.className = "search-mode-bar";
-    bar.id = "searchModeBar";
-    bar.innerHTML = `
-      <button class="mode-toggle" id="modeOSM" onclick="window.aiSearch.setMode('osm')">
-        🗺️ Quick Search <span class="mode-tag">OSM</span>
-      </button>
-      <button class="mode-toggle active" id="modeAI" onclick="window.aiSearch.setMode('ai')">
-        🤖 AI Search <span class="mode-tag">LLM</span>
-      </button>
-    `;
-    controls.parentNode.insertBefore(bar, controls);
-  }
-
-  // ─── Set search mode ───
-  function setMode(mode) {
-    searchMode = mode;
-    document.getElementById("modeOSM").classList.toggle("active", mode === "osm");
-    document.getElementById("modeAI").classList.toggle("active", mode === "ai");
-  }
-
-  // ─── Override the global searchHalal function ───
-  const originalSearchHalal = window.searchHalal;
-
-  window.searchHalal = function () {
-    if (searchMode === "ai") {
-      searchAI();
-    } else {
-      originalSearchHalal();
-    }
-  };
-
-  // ─── AI Search (SSE streaming) ───
-  async function searchAI() {
+  window.searchHalal = async function () {
     const radius = document.getElementById("radiusSelect").value;
     const loader = document.getElementById("loader");
     const emptyState = document.getElementById("emptyState");
@@ -185,250 +117,131 @@
     const statusBar = document.getElementById("statusBar");
     const searchBtn = document.getElementById("searchBtn");
 
-    loader.classList.remove("active");
+    // Reset
     emptyState.classList.remove("active");
     cardsEl.innerHTML = "";
     searchBtn.disabled = true;
-    aiPlaces = [];
+    currentPlaces = [];
+    if (window.markersLayer) window.markersLayer.clearLayers();
 
-    // Show AI status
+    // Show pulsating AI loading
+    loader.classList.remove("active");
     statusBar.innerHTML = `
-      <div class="ai-status">
-        <div class="ai-spinner"></div>
-        <span class="phase-label">Discovering</span> — Searching for halal restaurants...
+      <div class="ai-loading-bar">
+        <span class="pulse">✨</span>
+        AI is performing search for halal food...
       </div>
     `;
 
-    // Clear map markers
-    if (window.markersLayer) window.markersLayer.clearLayers();
-
     try {
-      const response = await fetch("/api/ai/search", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          lat: window.searchLat,
-          lng: window.searchLng,
-          radius: parseInt(radius),
-        }),
-      });
-
-      if (!response.ok) throw new Error("Agent service unavailable");
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop(); // keep incomplete line in buffer
-
-        for (const line of lines) {
-          if (line.startsWith("data: ")) {
-            const jsonStr = line.slice(6);
-            try {
-              const data = JSON.parse(jsonStr);
-              handleSSEEvent(line, data, cardsEl, statusBar);
-            } catch (e) {
-              // Not JSON, might be event: line
-            }
-          } else if (line.startsWith("event: ")) {
-            // Store event type for next data line
-            buffer = line + "\n" + buffer;
-          }
-        }
+      // ───── STEP 1: OSM Discovery (fast, geographic) ─────
+      const lat = window.searchLat;
+      const lng = window.searchLng;
+      if (!lat || !lng) {
+        statusBar.innerHTML = "⚠️ Please select a location first";
+        searchBtn.disabled = false;
+        return;
       }
 
+      const osmRes = await fetch(`/api/halal?lat=${lat}&lng=${lng}&radius=${radius}`);
+      const osmData = await osmRes.json();
+
+      if (!osmRes.ok) throw new Error(osmData.error || "Search failed");
+
+      let places = osmData.places || [];
+
+      // Sort by distance
+      places.forEach((p) => {
+        p.distance = window.getDistance ? getDistance(lat, lng, p.lat, p.lng) : 0;
+      });
+      places.sort((a, b) => a.distance - b.distance);
+
+      if (places.length === 0) {
+        emptyState.classList.add("active");
+        statusBar.innerHTML = "No food places found nearby. Try a larger radius.";
+        searchBtn.disabled = false;
+        return;
+      }
+
+      // Store reference
+      currentPlaces = places;
+      window.places = places; // for the original modal to work
+
+      statusBar.innerHTML = `
+        <div class="ai-loading-bar">
+          <span class="pulse">✨</span>
+          Found ${places.length} places — AI is researching halal status...
+        </div>
+      `;
+
+      // ───── STEP 2: Render cards + map markers immediately ─────
+      places.forEach((place, i) => {
+        renderHybridCard(place, i, cardsEl);
+
+        if (window.markersLayer && window.L) {
+          const icon = L.divIcon({
+            className: "",
+            html: '<div style="width:30px;height:30px;background:#1a6b4a;border:2px solid white;border-radius:50%;box-shadow:0 2px 8px rgba(0,0,0,0.2);display:flex;align-items:center;justify-content:center;font-size:15px;">🍽️</div>',
+            iconSize: [30, 30],
+            iconAnchor: [15, 15],
+          });
+          const marker = L.marker([place.lat, place.lng], { icon: icon })
+            .addTo(window.markersLayer)
+            .bindPopup("<b>" + escHtml(place.name) + "</b>");
+          marker.on("click", function () { openHybridModal(i); });
+        }
+      });
+
+      // Fit map bounds
+      if (window.map && window.L) {
+        const bounds = L.latLngBounds(places.map((p) => [p.lat, p.lng]));
+        bounds.extend([lat, lng]);
+        map.fitBounds(bounds, { padding: [40, 40] });
+      }
+
+      // ───── STEP 3: AI research on each place (background) ─────
+      let researchedCount = 0;
+      const researchPromises = places.map(async (place, i) => {
+        try {
+          const result = await researchPlace(place);
+          researchedCount++;
+
+          // Update card badge
+          if (result && result.classification) {
+            updateCardBadge(i, result.classification);
+          }
+
+          // Update status
+          statusBar.innerHTML = `
+            <div class="ai-loading-bar">
+              <span class="pulse">✨</span>
+              Researching... ${researchedCount}/${places.length} places done
+            </div>
+          `;
+        } catch (e) {
+          console.warn("Research failed for", place.name, e);
+        }
+      });
+
+      // Wait for all research to complete
+      await Promise.all(researchPromises);
+
+      // Final status
+      statusBar.innerHTML = `Found <span class="count">${places.length}</span> place${places.length > 1 ? "s" : ""} — AI research complete ✨`;
+
     } catch (err) {
-      statusBar.innerHTML = `⚠️ AI Search failed: ${err.message}. Try Quick Search (OSM) instead.`;
+      statusBar.innerHTML = `⚠️ ${err.message}`;
+      console.error("Hybrid search error:", err);
     }
 
     searchBtn.disabled = false;
-  }
+  };
 
-  // ─── Handle SSE events ───
-  function handleSSEEvent(rawLine, data, cardsEl, statusBar) {
-    // Parse event type from the raw SSE stream
-    if (data.phase) {
-      // Status event
-      statusBar.innerHTML = `
-        <div class="ai-status">
-          <div class="ai-spinner"></div>
-          <span class="phase-label">${data.phase === "discovery" ? "Discovering" : "Processing"}</span>
-          — ${escHtml(data.message)}
-        </div>
-      `;
-      return;
-    }
+  // ─── Research a single place via AI agent ───
+  async function researchPlace(place) {
+    const cacheKey = place.name + "_" + (place.lat || 0).toFixed(3);
+    if (aiResearchCache[cacheKey]) return aiResearchCache[cacheKey];
 
-    if (data.name && data.lat && data.lng) {
-      // Place event — add to map + cards
-      const idx = aiPlaces.length;
-      data.distance = window.getDistance
-        ? getDistance(window.searchLat, window.searchLng, data.lat, data.lng)
-        : 0;
-      aiPlaces.push(data);
-
-      // Render card
-      renderAICard(data, idx, cardsEl);
-
-      // Add map marker
-      if (window.markersLayer && window.L) {
-        const icon = L.divIcon({
-          className: "",
-          html: '<div style="width:30px;height:30px;background:#1a6b4a;border:2px solid white;border-radius:50%;box-shadow:0 2px 8px rgba(0,0,0,0.2);display:flex;align-items:center;justify-content:center;font-size:15px;">🍽️</div>',
-          iconSize: [30, 30],
-          iconAnchor: [15, 15],
-        });
-        const marker = L.marker([data.lat, data.lng], { icon: icon })
-          .addTo(window.markersLayer)
-          .bindPopup("<b>" + escHtml(data.name) + "</b>");
-        marker.on("click", function () { openAIModal(idx); });
-      }
-
-      // Update status
-      statusBar.innerHTML = `Found <span class="count">${aiPlaces.length}</span> place${aiPlaces.length > 1 ? "s" : ""} so far...`;
-      return;
-    }
-
-    if (data.count !== undefined) {
-      // Done event
-      const radius = document.getElementById("radiusSelect").value;
-      if (aiPlaces.length === 0) {
-        document.getElementById("emptyState").classList.add("active");
-        statusBar.innerHTML = "No halal places found. Try a larger radius.";
-      } else {
-        statusBar.innerHTML = `Found <span class="count">${aiPlaces.length}</span> halal place${aiPlaces.length > 1 ? "s" : ""} via AI search`;
-        // Fit map bounds
-        if (window.map && window.L && aiPlaces.length > 0) {
-          const bounds = L.latLngBounds(aiPlaces.map(function (p) { return [p.lat, p.lng]; }));
-          bounds.extend([window.searchLat, window.searchLng]);
-          map.fitBounds(bounds, { padding: [40, 40] });
-        }
-      }
-      return;
-    }
-
-    if (data.message) {
-      // Error event
-      statusBar.innerHTML = "⚠️ " + escHtml(data.message);
-    }
-  }
-
-  // ─── Render AI card ───
-  function renderAICard(place, index, container) {
-    const card = document.createElement("div");
-    card.className = "card";
-    card.onclick = function () { openAIModal(index); };
-    card.setAttribute("role", "button");
-    card.setAttribute("tabindex", "0");
-    card.id = "ai-card-" + index;
-
-    const distStr = place.distance < 1000
-      ? Math.round(place.distance) + "m away"
-      : (place.distance / 1000).toFixed(1) + "km away";
-
-    const status = place.halalStatus || "unverified";
-    const badge = AI_BADGES[status] || AI_BADGES.unverified;
-
-    card.innerHTML = `
-      <div class="card-header">
-        <div class="card-name">${escHtml(place.name)}</div>
-        <span class="card-badge ${badge.cls}">${badge.icon} ${badge.label}</span>
-      </div>
-      ${place.cuisine ? '<div class="card-cuisine">🍴 ' + escHtml(place.cuisine) + "</div>" : ""}
-      <div class="card-distance">📍 ${distStr}</div>
-      ${place.address ? '<div class="card-address">' + escHtml(place.address) + "</div>" : ""}
-      <div class="card-ai-status" id="ai-card-status-${index}">
-        🤖 <span style="color:#1a6b4a;">AI powered</span> — tap for details
-      </div>
-    `;
-    container.appendChild(card);
-  }
-
-  // ─── Open AI modal with SSE research streaming ───
-  function openAIModal(index) {
-    const p = aiPlaces[index];
-    if (!p) return;
-
-    const distStr = p.distance < 1000
-      ? Math.round(p.distance) + "m away"
-      : (p.distance / 1000).toFixed(1) + "km away";
-
-    const status = p.halalStatus || "unverified";
-    const badge = AI_BADGES[status] || AI_BADGES.unverified;
-
-    // Header
-    document.getElementById("modalHeader").innerHTML = `
-      <h2>${escHtml(p.name)}</h2>
-      <div class="modal-badges">
-        <span class="card-badge ${badge.cls}">${badge.icon} ${badge.label}</span>
-        <span class="card-badge badge-type">🤖 AI Research</span>
-      </div>
-    `;
-
-    // Quick info
-    let bodyHtml = "";
-    const rows = [
-      { icon: "📍", label: "Distance", value: distStr },
-      p.cuisine && { icon: "🍴", label: "Cuisine", value: p.cuisine },
-      p.address && { icon: "🏠", label: "Address", value: p.address },
-    ].filter(Boolean);
-
-    rows.forEach(function (r) {
-      bodyHtml += `
-        <div class="detail-row">
-          <div class="detail-icon">${r.icon}</div>
-          <div class="detail-content">
-            <div class="detail-label">${r.label}</div>
-            <div class="detail-value">${escHtml(r.value)}</div>
-          </div>
-        </div>`;
-    });
-    document.getElementById("modalBody").innerHTML = bodyHtml;
-
-    // Show shimmer in gallery + article areas
-    document.getElementById("modalGallery").innerHTML = '<div class="shimmer shimmer-img" style="flex-shrink:0;"></div>';
-    document.getElementById("modalArticle").innerHTML = `
-      <div class="ai-status">
-        <div class="ai-spinner"></div>
-        <span class="phase-label">Researching</span> — gathering evidence about ${escHtml(p.name)}...
-      </div>
-      <div class="shimmer shimmer-title" style="margin-top:12px;"></div>
-      <div class="shimmer shimmer-line"></div>
-      <div class="shimmer shimmer-line-med"></div>
-      <div class="shimmer shimmer-line"></div>
-      <div class="shimmer shimmer-line-short"></div>
-    `;
-    document.getElementById("modalSources").innerHTML = "";
-
-    // Actions
-    document.getElementById("modalActions").innerHTML = `
-      <button class="btn btn-primary" onclick="navigateTo(${p.lat}, ${p.lng})">🧭 Directions</button>
-      <button class="btn btn-outline" onclick="panTo(${p.lat}, ${p.lng})">🗺️ Show on Map</button>
-    `;
-
-    // Open modal
-    document.getElementById("modalOverlay").classList.add("active");
-    document.body.style.overflow = "hidden";
-
-    // Check cache first
-    const cacheKey = p.name + "_" + p.lat.toFixed(3);
-    if (aiResearchCache[cacheKey]) {
-      renderAIResearch(aiResearchCache[cacheKey].research, aiResearchCache[cacheKey].article, p);
-      return;
-    }
-
-    // Stream research + article via SSE
-    fetchAIDetails(p, index, cacheKey);
-  }
-
-  // ─── Fetch AI details via SSE ───
-  async function fetchAIDetails(place, index, cacheKey) {
     try {
       const response = await fetch("/api/ai/place/details", {
         method: "POST",
@@ -436,7 +249,7 @@
         body: JSON.stringify(place),
       });
 
-      if (!response.ok) throw new Error("Research failed");
+      if (!response.ok) return null;
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
@@ -447,7 +260,6 @@
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split("\n");
         buffer = lines.pop();
@@ -456,57 +268,158 @@
           if (!line.startsWith("data: ")) continue;
           try {
             const data = JSON.parse(line.slice(6));
-
-            if (data.phase) {
-              // Update status in modal
-              const articleEl = document.getElementById("modalArticle");
-              if (articleEl && data.phase === "writing") {
-                articleEl.innerHTML = `
-                  <div class="ai-status">
-                    <div class="ai-spinner"></div>
-                    <span class="phase-label">Writing</span> — composing article for ${escHtml(place.name)}...
-                  </div>
-                `;
-              }
-            }
-
-            if (data.classification) {
-              research = data;
-              // Update card badge
-              updateCardBadge(index, data.classification);
-            }
-
-            if (data.article || data.title) {
-              article = data;
-            }
-
-            if (data.name && !data.classification && !data.article) {
-              // Done event
-              if (research || article) {
-                aiResearchCache[cacheKey] = { research: research, article: article };
-                renderAIResearch(research, article, place);
-              }
-            }
-          } catch (e) { /* skip non-JSON */ }
+            if (data.classification) research = data;
+            if (data.article || data.title) article = data;
+          } catch (e) {}
         }
       }
 
-      // Final render if not triggered by done event
-      if ((research || article) && !aiResearchCache[cacheKey]) {
-        aiResearchCache[cacheKey] = { research: research, article: article };
-        renderAIResearch(research, article, place);
-      }
+      const result = { research, article, classification: research?.classification || null };
+      aiResearchCache[cacheKey] = result;
+      return result;
 
-    } catch (err) {
-      document.getElementById("modalArticle").innerHTML = `
-        <p style="color:#5a5a7a;">⚠️ Could not load AI research: ${escHtml(err.message)}</p>
-      `;
+    } catch (e) {
+      console.warn("Research API error:", e);
+      return null;
     }
   }
 
-  // ─── Render AI research results in modal ───
-  function renderAIResearch(research, article, place) {
-    // Images
+  // ─── Render hybrid card ───
+  function renderHybridCard(place, index, container) {
+    const card = document.createElement("div");
+    card.className = "card";
+    card.onclick = function () { openHybridModal(index); };
+    card.setAttribute("role", "button");
+    card.setAttribute("tabindex", "0");
+    card.id = "hybrid-card-" + index;
+
+    const distStr = place.distance < 1000
+      ? Math.round(place.distance) + "m away"
+      : (place.distance / 1000).toFixed(1) + "km away";
+
+    card.innerHTML = `
+      <div class="card-header">
+        <div class="card-name">${escHtml(place.name)}</div>
+        <span class="card-badge badge-unverified" id="badge-${index}">⚪ Checking...</span>
+      </div>
+      ${place.cuisine ? '<div class="card-cuisine">🍴 ' + escHtml(formatCuisine(place.cuisine)) + "</div>" : ""}
+      <div class="card-distance">📍 ${distStr}</div>
+      ${place.address ? '<div class="card-address">' + escHtml(place.address) + "</div>" : ""}
+      <div class="card-research-status" id="research-status-${index}">
+        <span class="mini-pulse">✨</span> AI researching halal status...
+      </div>
+    `;
+    container.appendChild(card);
+  }
+
+  // ─── Update card badge after research ───
+  function updateCardBadge(index, classification) {
+    const status = classification.status || "unverified";
+    const badge = AI_BADGES[status] || AI_BADGES.unverified;
+
+    const badgeEl = document.getElementById("badge-" + index);
+    if (badgeEl) {
+      badgeEl.className = "card-badge " + badge.cls;
+      badgeEl.innerHTML = badge.icon + " " + badge.label;
+    }
+
+    const statusEl = document.getElementById("research-status-" + index);
+    if (statusEl) {
+      const conf = classification.confidence || "low";
+      statusEl.innerHTML = `✨ ${badge.label} — ${conf} confidence`;
+      statusEl.style.color = "#1a6b4a";
+    }
+
+    if (currentPlaces[index]) {
+      currentPlaces[index].halalStatus = status;
+      currentPlaces[index].aiClassification = classification;
+    }
+  }
+
+  // ─── Open hybrid modal ───
+  function openHybridModal(index) {
+    const p = currentPlaces[index];
+    if (!p) return;
+
+    const distStr = p.distance < 1000
+      ? Math.round(p.distance) + "m away"
+      : (p.distance / 1000).toFixed(1) + "km away";
+
+    const classification = p.aiClassification || {};
+    const status = classification.status || p.halalStatus || "unverified";
+    const badge = AI_BADGES[status] || AI_BADGES.unverified;
+
+    // Header
+    document.getElementById("modalHeader").innerHTML = `
+      <h2>${escHtml(p.name)}</h2>
+      <div class="modal-badges">
+        <span class="card-badge ${badge.cls}">${badge.icon} ${badge.label}</span>
+        ${p.type ? '<span class="card-badge badge-type">' + formatType(p.type) + '</span>' : ''}
+      </div>
+    `;
+
+    // Quick info
+    let bodyHtml = "";
+    const rows = [
+      { icon: "📍", label: "Distance", value: distStr },
+      p.cuisine && { icon: "🍴", label: "Cuisine", value: formatCuisine(p.cuisine) },
+      p.address && { icon: "🏠", label: "Address", value: p.address },
+      p.openingHours && { icon: "🕐", label: "Hours", value: p.openingHours },
+      p.phone && { icon: "📞", label: "Phone", value: '<a href="tel:' + escHtml(p.phone) + '">' + escHtml(p.phone) + '</a>' },
+      p.website && { icon: "🌐", label: "Website", value: '<a href="' + escHtml(p.website) + '" target="_blank">Visit</a>' },
+    ].filter(Boolean);
+
+    rows.forEach(function (r) {
+      bodyHtml += '<div class="detail-row"><div class="detail-icon">' + r.icon + '</div><div class="detail-content"><div class="detail-label">' + r.label + '</div><div class="detail-value">' + (r.value.includes("<a") ? r.value : escHtml(r.value)) + '</div></div></div>';
+    });
+    document.getElementById("modalBody").innerHTML = bodyHtml;
+
+    // Actions
+    document.getElementById("modalActions").innerHTML = `
+      <button class="btn btn-primary" onclick="navigateTo(${p.lat}, ${p.lng})">🧭 Directions</button>
+      <button class="btn btn-outline" onclick="panTo(${p.lat}, ${p.lng})">🗺️ Show on Map</button>
+    `;
+
+    // Check if AI research is available
+    const cacheKey = p.name + "_" + (p.lat || 0).toFixed(3);
+    const cached = aiResearchCache[cacheKey];
+
+    if (cached) {
+      renderResearchInModal(cached, p);
+    } else {
+      // Show loading
+      document.getElementById("modalGallery").innerHTML = '<div class="shimmer shimmer-img" style="flex-shrink:0;"></div>';
+      document.getElementById("modalArticle").innerHTML = `
+        <div class="ai-loading-bar">
+          <span class="pulse">✨</span> AI is researching ${escHtml(p.name)}...
+        </div>
+        <div class="shimmer shimmer-title" style="margin-top:12px;"></div>
+        <div class="shimmer shimmer-line"></div>
+        <div class="shimmer shimmer-line-med"></div>
+      `;
+      document.getElementById("modalSources").innerHTML = "";
+
+      // Trigger research if not already running
+      researchPlace(p).then(function (result) {
+        if (result) {
+          renderResearchInModal(result, p);
+          updateCardBadge(index, result.classification || {});
+        }
+      });
+    }
+
+    // Open modal
+    document.getElementById("modalOverlay").classList.add("active");
+    document.body.style.overflow = "hidden";
+  }
+
+  // ─── Render research results in modal ───
+  function renderResearchInModal(result, place) {
+    const research = result.research;
+    const article = result.article;
+    const classification = result.classification || (research && research.classification) || {};
+
+    // Gallery
     const galleryEl = document.getElementById("modalGallery");
     const images = (article && article.images) || (research && research.images) || [];
     if (images.length > 0) {
@@ -522,134 +435,73 @@
     let html = "";
 
     if (article && article.title) {
-      html += '<div class="ai-article-section">';
-      html += "<h3>" + escHtml(article.title) + "</h3>";
-
+      html += '<div class="ai-article-section"><h3>' + escHtml(article.title) + "</h3>";
       if (article.article) {
-        // Render markdown-ish article
-        const rendered = article.article
-          .split("\n\n")
-          .map(function (block) {
-            block = block.trim();
-            if (!block) return "";
-            return "<p>" + escHtml(block).replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>") + "</p>";
-          })
-          .join("");
-        html += rendered;
+        html += article.article.split("\n\n").map(function (block) {
+          block = block.trim();
+          if (!block) return "";
+          return "<p>" + escHtml(block).replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>") + "</p>";
+        }).join("");
       }
-
-      // Tags
       if (article.tags && article.tags.length > 0) {
-        html += '<div class="ai-tags">';
-        article.tags.forEach(function (tag) {
-          html += '<span class="ai-tag">' + escHtml(tag) + "</span>";
-        });
-        html += "</div>";
+        html += '<div class="ai-tags">' + article.tags.map(function (t) { return '<span class="ai-tag">' + escHtml(t) + "</span>"; }).join("") + "</div>";
       }
-
       html += "</div>";
     }
 
-    // Classification details
-    if (research && research.classification) {
-      const cls = research.classification;
-      const badge = AI_BADGES[cls.status] || AI_BADGES.unverified;
-
-      html += '<div class="ai-article-section">';
-      html += '<h3>☪️ Halal Assessment</h3>';
-      html += '<p><strong>' + badge.icon + " " + (cls.label || cls.status) + "</strong></p>";
-
-      if (cls.confidence) {
-        html += '<div class="ai-confidence">Confidence: <span class="level-' + cls.confidence + '">' + cls.confidence.toUpperCase() + "</span></div>";
+    // Classification section
+    if (classification.status) {
+      const badge = AI_BADGES[classification.status] || AI_BADGES.unverified;
+      html += '<div class="ai-article-section"><h3>☪️ Halal Assessment</h3>';
+      html += '<p><strong>' + badge.icon + " " + (classification.label || classification.status) + "</strong></p>";
+      if (classification.confidence) {
+        html += '<div class="ai-confidence">Confidence: <span class="level-' + classification.confidence + '">' + classification.confidence.toUpperCase() + "</span></div>";
+      }
+      if (classification.reasoning) {
+        html += "<p style='font-size:13px;color:#5a5a7a;margin-top:8px;'>" + escHtml(classification.reasoning) + "</p>";
       }
 
-      if (cls.reasoning) {
-        html += "<p style='font-size:13px;color:#5a5a7a;margin-top:8px;'>" + escHtml(cls.reasoning) + "</p>";
-      }
-
-      if (cls.certificate) {
-        html += "<p>📜 Certificate: <strong>" + escHtml(cls.certificate) + "</strong></p>";
-      }
-
-      // Extra details from classification
       const details = [
-        cls.cuisine && { icon: "🍴", label: "Cuisine", value: cls.cuisine },
-        cls.price_range && { icon: "💰", label: "Price", value: cls.price_range },
-        cls.popular_dishes && cls.popular_dishes.length > 0 && { icon: "⭐", label: "Popular", value: cls.popular_dishes.join(", ") },
-        cls.hours && { icon: "🕐", label: "Hours", value: cls.hours },
-        cls.phone && { icon: "📞", label: "Phone", value: cls.phone },
-        cls.website && { icon: "🌐", label: "Website", value: '<a href="' + escHtml(cls.website) + '" target="_blank">Visit</a>' },
+        classification.cuisine && { icon: "🍴", label: "Cuisine", value: classification.cuisine },
+        classification.price_range && { icon: "💰", label: "Price", value: classification.price_range },
+        classification.popular_dishes && classification.popular_dishes.length > 0 && { icon: "⭐", label: "Popular", value: classification.popular_dishes.join(", ") },
+        classification.hours && { icon: "🕐", label: "Hours", value: classification.hours },
+        classification.phone && { icon: "📞", label: "Phone", value: classification.phone },
+        classification.website && { icon: "🌐", label: "Website", value: '<a href="' + escHtml(classification.website) + '" target="_blank">Visit</a>' },
       ].filter(Boolean);
 
       details.forEach(function (d) {
         html += '<div class="detail-row"><div class="detail-icon">' + d.icon + '</div><div class="detail-content"><div class="detail-label">' + d.label + '</div><div class="detail-value">' + (d.value.includes("<a") ? d.value : escHtml(d.value)) + "</div></div></div>";
       });
-
       html += "</div>";
     }
 
-    articleEl.innerHTML = html || '<p style="color:#5a5a7a;">No additional details available.</p>';
+    articleEl.innerHTML = html || '<p style="color:#5a5a7a;">AI research in progress...</p>';
   }
 
-  // ─── Update card badge after research completes ───
-  function updateCardBadge(index, classification) {
-    const card = document.getElementById("ai-card-" + index);
-    if (!card) return;
-
-    const status = classification.status || "unverified";
-    const badge = AI_BADGES[status] || AI_BADGES.unverified;
-
-    // Update badge
-    const badgeEl = card.querySelector(".card-badge");
-    if (badgeEl) {
-      badgeEl.className = "card-badge " + badge.cls;
-      badgeEl.innerHTML = badge.icon + " " + badge.label;
-    }
-
-    // Update AI status line
-    const statusEl = document.getElementById("ai-card-status-" + index);
-    if (statusEl) {
-      statusEl.innerHTML = "🤖 <span style='color:#1a6b4a;'>Researched</span> — " +
-        (classification.confidence || "low") + " confidence";
-    }
-
-    // Update the place in aiPlaces
-    if (aiPlaces[index]) {
-      aiPlaces[index].halalStatus = status;
-    }
-  }
-
-  // ─── Helper: use global escHtml ───
+  // ─── Helpers ───
   function escHtml(str) {
     if (window.escHtml) return window.escHtml(str);
-    const div = document.createElement("div");
-    div.textContent = str;
-    return div.innerHTML;
+    const d = document.createElement("div");
+    d.textContent = str;
+    return d.innerHTML;
   }
 
-  // ─── Initialize on DOM ready ───
-  function init() {
-    // Wait for the main app to be ready
-    const check = setInterval(function () {
-      if (document.querySelector(".controls")) {
-        clearInterval(check);
-        injectSearchModeToggle();
-        console.log("🤖 AI Search module loaded");
-      }
-    }, 200);
+  function formatCuisine(c) {
+    if (window.formatCuisine) return window.formatCuisine(c);
+    return c.split(";").map(function (s) { return s.trim().replace(/_/g, " ").replace(/\b\w/g, function (l) { return l.toUpperCase(); }); }).join(", ");
   }
 
-  // Export to window
+  function formatType(type) {
+    const map = { restaurant: "🍽️ Restaurant", fast_food: "🍔 Fast Food", cafe: "☕ Café", food_court: "🏪 Food Court" };
+    return map[type] || type;
+  }
+
+  // ─── Public API ───
   window.aiSearch = {
-    setMode: setMode,
-    getMode: function () { return searchMode; },
-    openAIModal: openAIModal,
+    getMode: function () { return "hybrid"; },
+    openHybridModal: openHybridModal,
   };
 
-  // Start
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", init);
-  } else {
-    init();
-  }
+  console.log("✨ AI Search (hybrid) loaded — OSM discovery + AI research");
 })();
