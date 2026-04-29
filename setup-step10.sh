@@ -40,6 +40,16 @@ else
   echo "✅ index.html patched — added ai-search.js"
 fi
 
+# ─── 2b. Patch index.html: add ai-debug.js script ───
+if grep -q "ai-debug.js" public/index.html 2>/dev/null; then
+  echo "✅ index.html already has ai-debug.js"
+else
+  # Insert <script src="/ai-debug.js"></script> after ai-search.js
+  sed -i.bak 's|</body>|<script src="/ai-debug.js"></script>\n</body>|' public/index.html
+  rm -f public/index.html.bak
+  echo "✅ index.html patched — added ai-debug.js (activate with ?debug=1)"
+fi
+
 # ─── 3. Verify ───
 echo ""
 echo "═══════════════════════════════════════════════════"
@@ -48,7 +58,8 @@ echo "════════════════════════�
 echo ""
 echo "Verify:"
 grep -n "ai-routes" server.js && echo "  ✓ AI routes in server.js"
-grep -n "ai-search.js" public/index.html && echo "  ✓ AI script in index.html"
+grep -n "ai-search.js" public/index.html && echo "  ✓ AI search in index.html"
+grep -n "ai-debug.js" public/index.html && echo "  ✓ AI debug in index.html (use ?debug=1)"
 echo ""
 echo "New files:"
-ls -la ai-routes.js public/ai-search.js
+ls -la ai-routes.js public/ai-search.js public/ai-debug.js
