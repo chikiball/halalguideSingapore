@@ -99,6 +99,15 @@ else
   echo "✅ index.html radius already patched"
 fi
 
+# ─── 2e. Patch index.html: update header subtitle ───
+if grep -q "AI powered" public/index.html 2>/dev/null; then
+  echo "✅ index.html header already updated"
+else
+  sed -i.bak 's|Find halal & Muslim-friendly food near you|✨AI powered - Find halal \& Muslim-friendly food near you|' public/index.html
+  rm -f public/index.html.bak
+  echo "✅ index.html patched — header updated with AI powered"
+fi
+
 # ─── 2d. Patch index.html: make Search here popup a button ───
 if grep -q "searchHalal()" public/index.html 2>/dev/null && ! grep -q "Search here.*searchHalal" public/index.html 2>/dev/null; then
   sed -i.bak "s|bindPopup(\"<b>Search here</b>\")|bindPopup('<div style=\"text-align:center\"><b>📍 Selected Location</b><br><button onclick=\"searchHalal()\" style=\"margin-top:6px;padding:6px 16px;background:#1a6b4a;color:white;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer\">🔍 Search here</button></div>')|" public/index.html

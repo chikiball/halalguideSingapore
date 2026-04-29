@@ -219,6 +219,11 @@ class SearchTool:
             "menu": f"{name} Singapore menu prices food",
             "reviews": f"{name} Singapore review rating",
             "vegan": f"{name} Singapore vegetarian vegan plant-based",
+            # Halal-specific directories and databases
+            "halaltag": f"site:halaltag.com {name} Singapore",
+            "halaltrip": f"site:halaltrip.com {name} Singapore",
+            "sethlah": f"site:sethlah.com {name}",
+            "muis_dir": f"site:muis.gov.sg {name} halal",
         }
 
         if queries_extra:

@@ -355,6 +355,13 @@ Search results:
         # 3. Check MUIS
         muis_result = await self.scraper.scrape_muis(name)
 
+        # 3b. Direct scrape halal directories (halaltag.com, etc.)
+        halal_directory_urls = [
+            f"https://www.halaltag.com/search?q={name.replace(' ', '+')}",
+            f"https://www.halaltrip.com/search/?q={name.replace(' ', '+')}+Singapore",
+        ]
+        directory_pages = await self.scraper.scrape_multiple(halal_directory_urls, max_concurrent=3)
+
         # 4. Compile all evidence
         evidence = {
             "search_snippets": {},
@@ -387,6 +394,18 @@ Search results:
                         "caption": page["title"],
                         "source": page["url"],
                     })
+
+        # Add halal directory scrape results to evidence
+        for page in directory_pages:
+            if isinstance(page, dict) and page.get("success"):
+                evidence["scraped_content"].append({
+                    "url": page["url"],
+                    "title": page["title"],
+                    "text": page["text"][:1500],
+                    "halal_related": True,  # these are halal directories
+                    "source_type": "halal_directory",
+                })
+                print(f"  📗 Halal directory: {page['url'][:60]} ({len(page['text'])} chars)")
 
         # 5. LLM classification
         evidence_text = self._format_evidence(name, place, evidence)
