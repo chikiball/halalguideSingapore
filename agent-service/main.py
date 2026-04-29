@@ -70,12 +70,21 @@ async def search_places(req: SearchRequest):
             yield {"event": "status", "data": json.dumps({"phase": "discovery", "message": "Searching for halal restaurants..."})}
 
             # Run discovery with debug callback
+            async def emit_debug(evt):
+                # Send debug events INLINE as they happen (not queued)
+                # Use a special "debug" flag so the browser can distinguish them
+                evt["debug"] = True
+                yield_data = json.dumps(evt)
+                # We can't yield from inside the callback, so we queue
+                await debug_queue.put(evt)
+
             places = await agent.discover_places(req.lat, req.lng, req.radius, debug_emit=debug_queue.put)
 
-            # Flush any remaining debug events
+            # Flush debug events collected during discovery
             while not debug_queue.empty():
                 evt = debug_queue.get_nowait()
-                yield {"event": "debug", "data": json.dumps(evt)}
+                # Send as status event with debug flag — browser can parse this
+                yield {"event": "status", "data": json.dumps({"phase": "debug", "debug": True, **evt})}
 
             for place in places:
                 yield {"event": "place", "data": json.dumps(place)}

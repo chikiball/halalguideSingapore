@@ -263,8 +263,8 @@
   let discoveredPlaces = [];
 
   function handleDebugEvent(data, url) {
-    // Agent debug events (from debug_emit callback)
-    if (data.type) {
+    // Agent debug events (sent as phase="debug" with type field)
+    if (data.debug || data.phase === "debug") {
       const tagMap = {
         phase: "phase", search: "search", geocode: "geocode",
         llm: "llm", filter: "search", cache: "info", error: "error",
