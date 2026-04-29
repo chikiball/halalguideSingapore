@@ -198,7 +198,7 @@ class HalalAgent:
         await _dbg("filter", f"📋 Pre-filter: {len(search_results)} → {len(filtered_results)} relevant results (rejected {len(rejected_results)} noise)",
                     {"kept": len(filtered_results), "rejected": len(rejected_results),
                      "area_keywords": area_keywords[:10],
-                     "kept_titles": [r.get("title", "")[:60] for r in filtered_results[:10]],
+                     "results": [{"title": r.get("title", "")[:80], "snippet": r.get("snippet", "")[:120], "url": r.get("url", "")[:100]} for r in filtered_results],
                      "rejected_sample": [r.get("title", "")[:60] for r in rejected_results[:5]]})
 
         # 3. Feed only filtered results to LLM (much smaller input)

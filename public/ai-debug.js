@@ -274,10 +274,21 @@
 
       // Expand search results as individual log lines
       if (data.data && data.data.results && data.data.results.length > 0) {
-        log("search", `📋 All ${data.data.results.length} search results:`);
+        log("search", `📋 All ${data.data.results.length} results fed to LLM:`);
         data.data.results.forEach((r, i) => {
-          log("search", `  ${i + 1}. ${r.title}`, { url: r.url });
+          const snippet = r.snippet ? ` — ${r.snippet.substring(0, 80)}` : "";
+          log("search", `  ${i + 1}. ${r.title}${snippet}`);
         });
+      }
+
+      // Show rejected samples
+      if (data.data && data.data.rejected_sample && data.data.rejected_sample.length > 0) {
+        log("search", `🗑️ Rejected (sample): ${data.data.rejected_sample.join(" | ")}`);
+      }
+
+      // Show area keywords used
+      if (data.data && data.data.area_keywords) {
+        log("search", `🔑 Area keywords: ${data.data.area_keywords.join(", ")}`);
       }
 
       // Expand LLM-extracted places as individual log lines
