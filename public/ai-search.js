@@ -143,7 +143,8 @@
         return;
       }
 
-      const osmRes = await fetch(`/api/halal?lat=${lat}&lng=${lng}&radius=${radius}`);
+      // Fetch ALL food places (not just halal-filtered) — AI will classify
+      const osmRes = await fetch(`/api/halal?lat=${lat}&lng=${lng}&radius=${radius}&all=true`);
       const osmData = await osmRes.json();
 
       if (!osmRes.ok) throw new Error(osmData.error || "Search failed");

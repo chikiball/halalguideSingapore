@@ -30,6 +30,21 @@ require("./ai-routes")(app);' server.js
   fi
 fi
 
+# ─── 1b. Patch server.js: support ?all=true to skip halal filter ───
+if grep -q "req.query.all" server.js 2>/dev/null; then
+  echo "✅ server.js already has all=true support"
+else
+  # Add ?all=true parameter check before the halal filter
+  sed -i.bak 's|// Filter for halal/Muslim-friendly places|// Skip halal filter if ?all=true (hybrid mode: AI classifies instead)\
+      var skipFilter = req.query.all === "true";\
+\
+      // Filter for halal/Muslim-friendly places|' server.js
+  # Change the filter line to check skipFilter
+  sed -i.bak 's|var halalPlaces = data.elements.filter(function (el) {|var halalPlaces = skipFilter ? data.elements : data.elements.filter(function (el) {|' server.js
+  rm -f server.js.bak
+  echo "✅ server.js patched — ?all=true skips halal filter"
+fi
+
 # ─── 2. Patch index.html: expose let-scoped vars on window ───
 if grep -q "window.searchLat" public/index.html 2>/dev/null; then
   echo "✅ index.html already has window bridge"
