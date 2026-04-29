@@ -30,7 +30,28 @@ require("./ai-routes")(app);' server.js
   fi
 fi
 
-# ─── 2. Patch index.html: add ai-search.js script ───
+# ─── 2. Patch index.html: expose let-scoped vars on window ───
+if grep -q "window.searchLat" public/index.html 2>/dev/null; then
+  echo "✅ index.html already has window bridge"
+else
+  # Insert a bridge script before </script> (end of main script block)
+  # This exposes let-scoped variables so ai-search.js IIFE can access them
+  sed -i.bak 's|// Handle escape key for modal|// Expose let-scoped vars for external modules (ai-search.js, ai-debug.js)\
+    window.searchLat = undefined; window.searchLng = undefined;\
+    window.markersLayer = undefined; window.map = undefined;\
+    Object.defineProperty(window, "searchLat", { get: function() { return searchLat; }, set: function(v) { searchLat = v; } });\
+    Object.defineProperty(window, "searchLng", { get: function() { return searchLng; }, set: function(v) { searchLng = v; } });\
+    Object.defineProperty(window, "markersLayer", { get: function() { return markersLayer; } });\
+    Object.defineProperty(window, "map", { get: function() { return map; } });\
+    window.getDistance = getDistance;\
+    window.escHtml = escHtml;\
+\
+    // Handle escape key for modal|' public/index.html
+  rm -f public/index.html.bak
+  echo "✅ index.html patched — exposed let vars on window"
+fi
+
+# ─── 2b. Patch index.html: add ai-search.js script ───
 if grep -q "ai-search.js" public/index.html 2>/dev/null; then
   echo "✅ index.html already has ai-search.js"
 else
