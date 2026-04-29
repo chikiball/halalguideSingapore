@@ -120,28 +120,31 @@ class HalalAgent:
     # PHASE 1 — DISCOVERY
     # ═══════════════════════════════════════════════════════════════
 
-    async def discover_places(self, lat: float, lng: float, radius: int) -> List[Dict]:
+    async def discover_places(self, lat: float, lng: float, radius: int, debug_emit=None) -> List[Dict]:
         """
         Phase 1: Search for restaurants, extract names, geocode them.
-
-        Flow:
-        1. Reverse geocode to get area name (e.g. "Kampong Glam")
-        2. Run 10 parallel SearXNG searches
-        3. Feed results to LLM → extract restaurant names + addresses
-        4. Geocode each extracted address
-        5. Filter by radius
+        debug_emit: optional async callback to emit debug events to SSE stream
         """
+        async def _dbg(event_type, message, data=None):
+            """Emit debug event if callback provided."""
+            print(f"  [{event_type}] {message}")
+            if debug_emit:
+                evt = {"type": event_type, "message": message}
+                if data:
+                    evt["data"] = data
+                await debug_emit(evt)
+
         cache_key = f"discover_{lat:.3f}_{lng:.3f}_{radius}"
         if cache_key in self._cache:
-            print(f"  📦 Cache hit: {cache_key}")
+            await _dbg("cache", f"Cache hit: {cache_key}")
             return self._cache[cache_key]
 
-        print(f"🔍 Phase 1: Discovering places near {lat:.4f}, {lng:.4f} (radius {radius}m)")
+        await _dbg("phase", f"🔍 Phase 1: Discovering near {lat:.4f}, {lng:.4f} (radius {radius}m)")
 
         # 1. Reverse geocode to get area name
         area_info = await self.geocoder.reverse_geocode(lat, lng)
         area_name = self.geocoder.get_area_name(area_info)
-        print(f"  📍 Area: {area_name}")
+        await _dbg("geocode", f"📍 Area: {area_name}")
 
         # 2. Run SearXNG searches with area-aware extra queries
         extra_queries = [
@@ -152,8 +155,11 @@ class HalalAgent:
             lat, lng, radius, extra_queries=extra_queries
         )
 
+        await _dbg("search", f"🔍 SearXNG returned {len(search_results)} unique results",
+                    {"count": len(search_results), "sample": [r.get("title", "")[:60] for r in search_results[:5]]})
+
         if not search_results:
-            print("  ❌ No search results found")
+            await _dbg("error", "❌ No search results found")
             return []
 
         # 3. Feed search results to LLM to extract restaurant names + addresses
@@ -171,6 +177,8 @@ Return ONLY a JSON array, no other text:
 Search results:
 {search_text}"""
 
+        await _dbg("llm", "🧠 Sending search results to LLM for extraction...")
+
         llm_response = await self._call_llm(
             system=self.prompt_discovery,
             user=extraction_prompt,
@@ -180,11 +188,13 @@ Search results:
         # 4. Parse LLM response
         extracted = self._parse_json_array(llm_response)
         if not extracted:
-            print("  ⚠️ LLM extraction returned no results, falling back to regex")
+            await _dbg("llm", "⚠️ LLM extraction returned no results, falling back to regex")
             extracted = self._regex_extract_places(search_results)
 
-        print(f"  🧠 LLM extracted {len(extracted)} places")
-        for i, item in enumerate(extracted[:10]):
+        await _dbg("llm", f"🧠 LLM extracted {len(extracted)} places",
+                    {"places": [{"name": e.get("name", "?"), "address": e.get("address", "")} for e in extracted[:15]]})
+
+        for i, item in enumerate(extracted[:15]):
             print(f"    [{i+1}] {item.get('name', '?')} | {item.get('address', 'no address')}")
 
         # 5. Geocode each extracted place (multi-strategy)
@@ -232,11 +242,12 @@ Search results:
                     continue
                 geo = await self.geocoder.geocode(strategy)
                 if geo:
-                    print(f"  📍 Geocoded: '{name}' via '{strategy[:50]}' → {geo['lat']:.4f}, {geo['lng']:.4f}")
+                    await _dbg("geocode", f"📍 Geocoded: '{name}' → {geo['lat']:.4f}, {geo['lng']:.4f}",
+                               {"strategy": strategy[:60], "lat": geo["lat"], "lng": geo["lng"]})
                     break
 
             if not geo:
-                print(f"  ❌ Could not geocode: '{name}' (tried {sum(1 for s in strategies if s)} strategies)")
+                await _dbg("geocode", f"❌ Failed to geocode: '{name}'", {"address": address})
                 continue
 
             place = {
@@ -251,11 +262,17 @@ Search results:
             }
             places.append(place)
 
+        await _dbg("geocode", f"📍 Geocoded {len(places)} of {len(extracted)} places",
+                    {"geocoded": len(places), "total": len(extracted)})
+
         # 6. Filter by radius + deduplicate
+        before_filter = len(places)
         places = self.geocoder.filter_by_radius(places, lat, lng, radius)
         places = self._deduplicate_places(places)
 
-        print(f"✅ Phase 1 complete: {len(places)} places within {radius}m")
+        await _dbg("filter", f"📍 Radius filter: {before_filter} → {len(places)} within {radius}m",
+                    {"before": before_filter, "after": len(places), "radius": radius,
+                     "places": [{"name": p["name"], "distance": p.get("distance", "?")} for p in places]})
 
         self._cache[cache_key] = places
         return places

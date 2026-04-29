@@ -57,15 +57,25 @@ class DetailRequest(BaseModel):
 
 @app.post("/search")
 async def search_places(req: SearchRequest):
-    """Phase 1: Discover halal places near coordinates. Returns SSE stream."""
+    """Phase 1: Discover halal places near coordinates. Returns SSE stream with debug events."""
     if not agent:
         raise HTTPException(503, "Agent not initialized")
+
+    # Collect debug events from the agent via a queue
+    import asyncio
+    debug_queue = asyncio.Queue()
 
     async def event_stream():
         try:
             yield {"event": "status", "data": json.dumps({"phase": "discovery", "message": "Searching for halal restaurants..."})}
 
-            places = await agent.discover_places(req.lat, req.lng, req.radius)
+            # Run discovery with debug callback
+            places = await agent.discover_places(req.lat, req.lng, req.radius, debug_emit=debug_queue.put)
+
+            # Flush any remaining debug events
+            while not debug_queue.empty():
+                evt = debug_queue.get_nowait()
+                yield {"event": "debug", "data": json.dumps(evt)}
 
             for place in places:
                 yield {"event": "place", "data": json.dumps(place)}
@@ -73,6 +83,11 @@ async def search_places(req: SearchRequest):
             yield {"event": "done", "data": json.dumps({"count": len(places)})}
         except Exception as e:
             yield {"event": "error", "data": json.dumps({"message": str(e)})}
+
+    # Start a background task that drains debug_queue and yields events
+    # But SSE generators can't be mixed easily, so we use a simpler approach:
+    # The agent emits debug events into the queue, and we drain after discovery completes.
+    # For real-time streaming, we'll refactor agent to yield events directly.
 
     return EventSourceResponse(event_stream())
 

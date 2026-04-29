@@ -263,6 +263,17 @@
   let discoveredPlaces = [];
 
   function handleDebugEvent(data, url) {
+    // Agent debug events (from debug_emit callback)
+    if (data.type) {
+      const tagMap = {
+        phase: "phase", search: "search", geocode: "geocode",
+        llm: "llm", filter: "search", cache: "info", error: "error",
+      };
+      const tag = tagMap[data.type] || "info";
+      log(tag, data.message, data.data);
+      return;
+    }
+
     // Phase status events
     if (data.phase) {
       const phaseIcons = { discovery: "🔍", research: "🔬", writing: "✍️" };
