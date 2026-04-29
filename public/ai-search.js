@@ -13,7 +13,7 @@
   "use strict";
 
   // ─── State ───
-  let searchMode = "osm"; // "osm" or "ai"
+  let searchMode = "ai"; // "osm" or "ai" — default to AI
   let aiPlaces = [];
   let aiResearchCache = {};
 
@@ -148,10 +148,10 @@
     bar.className = "search-mode-bar";
     bar.id = "searchModeBar";
     bar.innerHTML = `
-      <button class="mode-toggle active" id="modeOSM" onclick="window.aiSearch.setMode('osm')">
+      <button class="mode-toggle" id="modeOSM" onclick="window.aiSearch.setMode('osm')">
         🗺️ Quick Search <span class="mode-tag">OSM</span>
       </button>
-      <button class="mode-toggle" id="modeAI" onclick="window.aiSearch.setMode('ai')">
+      <button class="mode-toggle active" id="modeAI" onclick="window.aiSearch.setMode('ai')">
         🤖 AI Search <span class="mode-tag">LLM</span>
       </button>
     `;

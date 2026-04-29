@@ -71,6 +71,28 @@ else
   echo "✅ index.html patched — added ai-debug.js (activate with ?debug=1)"
 fi
 
+# ─── 2c. Patch index.html: default radius 500m, max 3km ───
+if grep -q "5000.*5 km" public/index.html 2>/dev/null; then
+  # Change default from 1500 to 500
+  sed -i.bak 's|<option value="1500" selected>1.5 km radius</option>|<option value="1500">1.5 km radius</option>|' public/index.html
+  sed -i.bak 's|<option value="500">500m radius</option>|<option value="500" selected>500m radius</option>|' public/index.html
+  # Remove 5km option
+  sed -i.bak '/<option value="5000">5 km radius<\/option>/d' public/index.html
+  rm -f public/index.html.bak
+  echo "✅ index.html patched — default 500m, removed 5km"
+else
+  echo "✅ index.html radius already patched"
+fi
+
+# ─── 2d. Patch index.html: make Search here popup a button ───
+if grep -q "searchHalal()" public/index.html 2>/dev/null && ! grep -q "Search here.*searchHalal" public/index.html 2>/dev/null; then
+  sed -i.bak "s|bindPopup(\"<b>Search here</b>\")|bindPopup('<div style=\"text-align:center\"><b>📍 Selected Location</b><br><button onclick=\"searchHalal()\" style=\"margin-top:6px;padding:6px 16px;background:#1a6b4a;color:white;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer\">🔍 Search here</button></div>')|" public/index.html
+  rm -f public/index.html.bak
+  echo "✅ index.html patched — Search here popup is now a button"
+else
+  echo "✅ index.html search bubble already patched"
+fi
+
 # ─── 3. Verify ───
 echo ""
 echo "═══════════════════════════════════════════════════"
