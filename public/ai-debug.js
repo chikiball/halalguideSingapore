@@ -263,8 +263,9 @@
   let discoveredPlaces = [];
 
   function handleDebugEvent(data, url) {
-    // Agent debug events (sent as phase="debug" with type field)
-    if (data.debug || data.phase === "debug") {
+    // ─── FIRST: check for agent debug events (has "type" field) ───
+    // These come from the agent's _dbg() callback via phase="debug"
+    if (data.type && (data.debug === true || data.phase === "debug")) {
       const tagMap = {
         phase: "phase", search: "search", geocode: "geocode",
         llm: "llm", filter: "search", cache: "info", error: "error",
@@ -272,48 +273,50 @@
       const tag = tagMap[data.type] || "info";
       log(tag, data.message);
 
-      // Expand search results as individual log lines
-      if (data.data && data.data.results && data.data.results.length > 0) {
-        log("search", `📋 All ${data.data.results.length} results fed to LLM:`);
-        data.data.results.forEach((r, i) => {
-          const snippet = r.snippet ? ` — ${r.snippet.substring(0, 80)}` : "";
-          log("search", `  ${i + 1}. ${r.title}${snippet}`);
-        });
-      }
+      // Expand nested data arrays
+      if (data.data) {
+        // Expand search/filter results
+        if (data.data.results && Array.isArray(data.data.results)) {
+          log(tag, `📋 All ${data.data.results.length} results fed to LLM:`);
+          data.data.results.forEach((r, i) => {
+            const snippet = r.snippet ? ` — ${r.snippet.substring(0, 80)}` : "";
+            log(tag, `  ${i + 1}. ${r.title || "?"}${snippet}`);
+          });
+        }
 
-      // Show rejected samples
-      if (data.data && data.data.rejected_sample && data.data.rejected_sample.length > 0) {
-        log("search", `🗑️ Rejected (sample): ${data.data.rejected_sample.join(" | ")}`);
-      }
+        // Expand LLM-extracted places
+        if (data.data.places && Array.isArray(data.data.places)) {
+          log(tag, `📋 All ${data.data.places.length} LLM-extracted places:`);
+          data.data.places.forEach((p, i) => {
+            log(tag, `  ${i + 1}. ${p.name || "?"} | ${p.address || "no address"}`);
+          });
+          // For filter type, mark surviving places
+          if (data.type === "filter") {
+            data.data.places.forEach((p) => {
+              log(tag, `  ✅ ${p.name} (${p.distance || "?"}m)`);
+            });
+          }
+        }
 
-      // Show area keywords used
-      if (data.data && data.data.area_keywords) {
-        log("search", `🔑 Area keywords: ${data.data.area_keywords.join(", ")}`);
-      }
+        // Show rejected samples
+        if (data.data.rejected_sample && data.data.rejected_sample.length > 0) {
+          log(tag, `🗑️ Rejected (sample): ${data.data.rejected_sample.join(" | ")}`);
+        }
 
-      // Expand LLM-extracted places as individual log lines
-      if (data.data && data.data.places && data.data.places.length > 0) {
-        log("llm", `📋 All ${data.data.places.length} LLM-extracted places:`);
-        data.data.places.forEach((p, i) => {
-          log("llm", `  ${i + 1}. ${p.name} | ${p.address || "no address"}`);
-        });
-      }
+        // Show area keywords
+        if (data.data.area_keywords) {
+          log(tag, `🔑 Area keywords: ${data.data.area_keywords.join(", ")}`);
+        }
 
-      // Expand filtered places
-      if (data.data && data.data.places && data.type === "filter") {
-        data.data.places.forEach((p, i) => {
-          log("search", `  ✅ ${p.name} (${p.distance}m)`);
-        });
-      }
-
-      // Show other data if present
-      if (data.data && !data.data.results && !data.data.places) {
-        log(tag, "  ↳ data:", data.data);
+        // Show other simple data
+        if (!data.data.results && !data.data.places && !data.data.rejected_sample && !data.data.area_keywords) {
+          log(tag, "  ↳", data.data);
+        }
       }
       return;
     }
 
-    // Phase status events
+    // ─── Regular phase status events (no "type" field) ───
     if (data.phase) {
       const phaseIcons = { discovery: "🔍", research: "🔬", writing: "✍️" };
       log("phase", `${phaseIcons[data.phase] || "⏳"} ${data.message}`);
