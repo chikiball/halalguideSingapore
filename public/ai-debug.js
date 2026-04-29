@@ -420,7 +420,7 @@
 
   // ─── Initial log ───
   log("info", "🐛 AI Debug panel active — URL: " + window.location.href);
-  log("info", "Search mode: " + (window.aiSearch?.getMode?.() || "unknown"));
-  log("info", "Tip: Toggle 🤖 AI Search and tap Search to see pipeline logs");
+  log("info", "✨ Hybrid mode: OSM discovery + AI research");
+  log("info", "Pick a location and tap Search to see the full pipeline");
 
 })();
