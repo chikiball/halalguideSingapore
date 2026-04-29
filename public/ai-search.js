@@ -232,10 +232,9 @@
             const cls = result.classification;
             const badge = AI_BADGES[cls.status] || AI_BADGES.unverified;
             _dbg("research", `✅ [${i + 1}] ${place.name} → ${badge.icon} ${badge.label} (${cls.confidence || "?"} confidence)`);
+            updateCardBadge(i, result.classification);
           } else {
             _dbg("research", `⚪ [${i + 1}] ${place.name} → no classification`);
-          }
-            updateCardBadge(i, result.classification);
           }
 
           // Update status
