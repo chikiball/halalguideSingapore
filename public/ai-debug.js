@@ -270,7 +270,35 @@
         llm: "llm", filter: "search", cache: "info", error: "error",
       };
       const tag = tagMap[data.type] || "info";
-      log(tag, data.message, data.data);
+      log(tag, data.message);
+
+      // Expand search results as individual log lines
+      if (data.data && data.data.results && data.data.results.length > 0) {
+        log("search", `📋 All ${data.data.results.length} search results:`);
+        data.data.results.forEach((r, i) => {
+          log("search", `  ${i + 1}. ${r.title}`, { url: r.url });
+        });
+      }
+
+      // Expand LLM-extracted places as individual log lines
+      if (data.data && data.data.places && data.data.places.length > 0) {
+        log("llm", `📋 All ${data.data.places.length} LLM-extracted places:`);
+        data.data.places.forEach((p, i) => {
+          log("llm", `  ${i + 1}. ${p.name} | ${p.address || "no address"}`);
+        });
+      }
+
+      // Expand filtered places
+      if (data.data && data.data.places && data.type === "filter") {
+        data.data.places.forEach((p, i) => {
+          log("search", `  ✅ ${p.name} (${p.distance}m)`);
+        });
+      }
+
+      // Show other data if present
+      if (data.data && !data.data.results && !data.data.places) {
+        log(tag, "  ↳ data:", data.data);
+      }
       return;
     }
 

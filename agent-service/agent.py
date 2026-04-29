@@ -156,7 +156,8 @@ class HalalAgent:
         )
 
         await _dbg("search", f"🔍 SearXNG returned {len(search_results)} unique results",
-                    {"count": len(search_results), "sample": [r.get("title", "")[:60] for r in search_results[:5]]})
+                    {"count": len(search_results),
+                     "results": [{"title": r.get("title", "")[:80], "url": r.get("url", "")[:100], "snippet": r.get("snippet", "")[:120]} for r in search_results]})
 
         if not search_results:
             await _dbg("error", "❌ No search results found")
