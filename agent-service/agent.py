@@ -163,8 +163,46 @@ class HalalAgent:
             await _dbg("error", "❌ No search results found")
             return []
 
-        # 3. Feed search results to LLM to extract restaurant names + addresses
-        search_text = self._format_search_results(search_results)
+        # 2b. PRE-FILTER: keep only results relevant to the area
+        # This reduces noise before sending to LLM (90 → ~20 results)
+        area_keywords = self._get_area_keywords(area_name, area_info)
+        filtered_results = []
+        rejected_results = []
+
+        for r in search_results:
+            text = f"{r.get('title', '')} {r.get('snippet', '')}".lower()
+            # Keep if: mentions area name, nearby areas, or looks like a restaurant listing
+            is_relevant = (
+                any(kw in text for kw in area_keywords)
+                or any(kw in text for kw in ["restaurant", "cafe", "hawker", "food centre", "food court", "stall", "eating house"])
+                or any(kw in text for kw in ["halal certified", "muis", "muslim owned", "no pork", "vegetarian", "vegan"])
+            )
+            # Reject if: clearly a blog/listicle/guide (not a specific restaurant)
+            is_noise = any(kw in text for kw in ["best halal", "top 10", "top 20", "guide to", "list of", "where to eat"])
+
+            if is_relevant and not is_noise:
+                filtered_results.append(r)
+            else:
+                rejected_results.append(r)
+
+        # If too aggressive, relax and include some rejected ones
+        if len(filtered_results) < 5 and rejected_results:
+            # Add back the rejected ones that at least mention food
+            for r in rejected_results:
+                text = f"{r.get('title', '')} {r.get('snippet', '')}".lower()
+                if any(kw in text for kw in ["restaurant", "food", "halal", "cafe", "eat"]):
+                    filtered_results.append(r)
+                if len(filtered_results) >= 15:
+                    break
+
+        await _dbg("filter", f"📋 Pre-filter: {len(search_results)} → {len(filtered_results)} relevant results (rejected {len(rejected_results)} noise)",
+                    {"kept": len(filtered_results), "rejected": len(rejected_results),
+                     "area_keywords": area_keywords[:10],
+                     "kept_titles": [r.get("title", "")[:60] for r in filtered_results[:10]],
+                     "rejected_sample": [r.get("title", "")[:60] for r in rejected_results[:5]]})
+
+        # 3. Feed only filtered results to LLM (much smaller input)
+        search_text = self._format_search_results(filtered_results[:30])
 
         extraction_prompt = f"""Extract all restaurant/food establishment names and their addresses from these search results.
 Only include places that appear to be in or near {area_name}, Singapore.
@@ -480,6 +518,43 @@ Return ONLY a JSON object:
         return article
 
     # ─── Helper methods ───────────────────────────────────────────
+
+    def _get_area_keywords(self, area_name: str, area_info: Optional[Dict]) -> List[str]:
+        """Generate area-specific keywords for pre-filtering search results."""
+        keywords = []
+
+        # Primary area name (lowercase)
+        if area_name and area_name != "Singapore":
+            keywords.append(area_name.lower())
+            # Also add parts of the name (e.g., "Bishan East" → "bishan")
+            for part in area_name.lower().split():
+                if len(part) > 3 and part not in ["east", "west", "north", "south", "central"]:
+                    keywords.append(part)
+
+        # Add neighbourhood, suburb, road from reverse geocode
+        if area_info:
+            for key in ["neighbourhood", "suburb", "road", "city"]:
+                val = area_info.get(key, "").lower().strip()
+                if val and val != "singapore" and len(val) > 2:
+                    keywords.append(val)
+                    # Add parts for compound names
+                    for part in val.split():
+                        if len(part) > 3:
+                            keywords.append(part)
+
+        # Add postcode if available
+        if area_info and area_info.get("postcode"):
+            keywords.append(area_info["postcode"])
+
+        # Deduplicate while preserving order
+        seen = set()
+        unique = []
+        for kw in keywords:
+            if kw not in seen:
+                seen.add(kw)
+                unique.append(kw)
+
+        return unique
 
     def _format_search_results(self, results: List[Dict]) -> str:
         """Format search results into text for the LLM."""
