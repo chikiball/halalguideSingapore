@@ -640,14 +640,20 @@ Return ONLY a JSON object:
         """Format all gathered evidence into text for the LLM."""
         parts = [f"=== Evidence for: {name} ===\n"]
 
-        # MUIS check
+        # MUIS check — now uses real API with definitive cert number
         muis = evidence.get("muis_check", {})
         if muis.get("certified"):
-            parts.append(f"MUIS CHECK: ✅ FOUND in MUIS certified list")
-            if muis.get("certificate_number"):
-                parts.append(f"Certificate: {muis['certificate_number']}")
+            parts.append(f"MUIS CHECK: ✅ OFFICIALLY CERTIFIED")
+            parts.append(f"  Certificate Number: {muis.get('certificate_number', 'N/A')}")
+            parts.append(f"  Certified Name: {muis.get('company_name', 'N/A')}")
+            parts.append(f"  Address: {muis.get('address', 'N/A')}")
+            parts.append(f"  Scheme: {muis.get('scheme', 'N/A')} — {muis.get('sub_scheme', 'N/A')}")
         else:
-            parts.append(f"MUIS CHECK: ❌ Not found in MUIS directory")
+            total = muis.get("total_records", 0)
+            parts.append(f"MUIS CHECK: ❌ Not found in MUIS directory (searched {total} records)")
+            # Show all_matches so LLM can reason about near-misses
+            for m in muis.get("all_matches", [])[:3]:
+                parts.append(f"  (MUIS result: {m['name']} | {m['number']} | {m['address']})")
 
         for snippet in muis.get("snippets", []):
             parts.append(f"  Note: {snippet}")

@@ -156,8 +156,14 @@ class ScraperTool:
 
     async def scrape_muis(self, restaurant_name: str) -> Dict:
         """
-        Check MUIS (Majlis Ugama Islam Singapura) halal certification.
-        Searches the MUIS halal directory for the restaurant name.
+        Check MUIS halal certification via the official MUIS e-Service API.
+
+        Flow:
+        1. GET https://halal.muis.gov.sg/halal/establishments → get session cookie + CSRF token
+        2. POST https://halal.muis.gov.sg/api/halal/establishments
+              {"text": restaurant_name}
+           with X-CSRF-TOKEN header + session cookie
+        3. Parse response — check if restaurant name appears in results
 
         Returns:
             {
@@ -166,7 +172,10 @@ class ScraperTool:
                 "certificate_number": str or None,
                 "company_name": str or None,
                 "address": str or None,
-                "expiry": str or None,
+                "scheme": str or None,  (e.g. "Eating Establishment")
+                "sub_scheme": str or None,  (e.g. "Restaurant" / "Food Court")
+                "total_records": int,
+                "all_matches": [{name, number, address, scheme}],
                 "search_url": str,
                 "snippets": [str],
             }
@@ -177,57 +186,125 @@ class ScraperTool:
             "certificate_number": None,
             "company_name": None,
             "address": None,
-            "expiry": None,
-            "search_url": "",
+            "scheme": None,
+            "sub_scheme": None,
+            "total_records": 0,
+            "all_matches": [],
+            "search_url": "https://halal.muis.gov.sg/halal/establishments",
             "snippets": [],
         }
 
-        # MUIS halal directory search URL
-        search_url = "https://www.muis.gov.sg/Halal/Halal-Certificates/Certified-Eating-Establishments"
-        result["search_url"] = search_url
+        muis_api = "https://halal.muis.gov.sg/api/halal/establishments"
+        muis_page = "https://halal.muis.gov.sg/halal/establishments"
 
         try:
-            # Try scraping MUIS eating establishments page
-            # The MUIS site may use JS rendering, so we also try a Google search fallback
-            queries = [
-                f'site:muis.gov.sg "{restaurant_name}" halal',
-                f'"{restaurant_name}" MUIS halal certificate Singapore',
-            ]
-
             async with httpx.AsyncClient(
-                timeout=self.timeout,
+                timeout=httpx.Timeout(15.0, connect=5.0),
                 follow_redirects=True,
             ) as client:
-                # Direct MUIS page scrape attempt
-                try:
-                    resp = await client.get(search_url, headers=self.headers)
-                    if resp.status_code == 200:
-                        soup = BeautifulSoup(resp.text, "html.parser")
-                        page_text = soup.get_text(separator=" ", strip=True).lower()
-                        name_lower = restaurant_name.lower()
 
-                        if name_lower in page_text:
-                            result["found"] = True
-                            result["certified"] = True
-                            result["snippets"].append(
-                                f"Restaurant name '{restaurant_name}' found on MUIS certified establishments page."
-                            )
-                except Exception:
-                    pass
+                # Step 1: GET the directory page to obtain session cookie + CSRF token
+                page_resp = await client.get(
+                    muis_page,
+                    headers={
+                        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                        "Accept": "text/html,application/xhtml+xml",
+                        "Accept-Language": "en-US,en;q=0.9",
+                    }
+                )
 
-            # Extract certificate pattern from any gathered text
-            # MUIS cert numbers look like: HA-xxxx-xxxx or M/xxxx/xxxx
-            cert_patterns = [
-                r"(HA[-/]\d{4}[-/]\d{4})",
-                r"(M[-/]\d{4}[-/]\d{4})",
-                r"(MUIS[-/]\w+[-/]\d+)",
-            ]
+                if page_resp.status_code != 200:
+                    print(f"  ☪️  MUIS page returned {page_resp.status_code}")
+                    return result
 
-            print(f"  ☪️ MUIS check for '{restaurant_name}': {'✅ FOUND' if result['found'] else '❌ Not found'}")
+                # Extract CSRF token from hidden input
+                soup = BeautifulSoup(page_resp.text, "html.parser")
+                csrf_input = soup.find("input", {"name": "__RequestVerificationToken"})
+                if not csrf_input or not csrf_input.get("value"):
+                    print(f"  ☪️  MUIS: could not extract CSRF token")
+                    return result
+
+                csrf_token = csrf_input["value"]
+
+                # Step 2: POST to MUIS API with session cookies + CSRF token
+                api_resp = await client.post(
+                    muis_api,
+                    json={"text": restaurant_name},
+                    headers={
+                        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                        "Content-Type": "application/json",
+                        "X-CSRF-TOKEN": csrf_token,
+                        "X-Requested-With": "XMLHttpRequest",
+                        "Accept": "application/json, text/plain, */*",
+                        "Referer": muis_page,
+                        "Origin": "https://halal.muis.gov.sg",
+                    }
+                )
+
+                if api_resp.status_code != 200:
+                    print(f"  ☪️  MUIS API returned {api_resp.status_code}")
+                    return result
+
+                data = api_resp.json()
+                records = data.get("data", [])
+                total = data.get("totalRecords", 0)
+                result["total_records"] = total
+
+                if not records:
+                    print(f"  ☪️  MUIS: no results for '{restaurant_name}'")
+                    return result
+
+                # Step 3: Match results against restaurant name
+                name_lower = restaurant_name.lower().strip()
+
+                # Store all matches for the LLM to reason about
+                result["all_matches"] = [
+                    {
+                        "name": r.get("name", ""),
+                        "number": r.get("number", ""),
+                        "address": r.get("address", ""),
+                        "scheme": r.get("schemeText", ""),
+                        "sub_scheme": r.get("subSchemeText", ""),
+                    }
+                    for r in records[:10]
+                ]
+
+                # Find best match — name must partially match
+                best = None
+                for r in records:
+                    r_name = r.get("name", "").lower().strip()
+                    # Check if either name contains the other
+                    if (name_lower in r_name or r_name in name_lower or
+                            any(word in r_name for word in name_lower.split() if len(word) > 3)):
+                        best = r
+                        break
+
+                if best:
+                    result["found"] = True
+                    result["certified"] = True
+                    result["certificate_number"] = best.get("number")
+                    result["company_name"] = best.get("name")
+                    result["address"] = best.get("address")
+                    result["scheme"] = best.get("schemeText")
+                    result["sub_scheme"] = best.get("subSchemeText")
+                    result["snippets"].append(
+                        f"✅ MUIS CERTIFIED: '{best['name']}' — Certificate: {best.get('number')} "
+                        f"| {best.get('schemeText')} ({best.get('subSchemeText')}) "
+                        f"| Address: {best.get('address')}"
+                    )
+                    print(f"  ☪️  MUIS ✅ CERTIFIED: '{restaurant_name}' → {best.get('number')} ({best.get('schemeText')})")
+                else:
+                    # No direct name match but show top results for LLM context
+                    result["snippets"].append(
+                        f"MUIS search for '{restaurant_name}' returned {total} results "
+                        f"but no direct name match. Top result: {records[0].get('name')} "
+                        f"at {records[0].get('address')}"
+                    )
+                    print(f"  ☪️  MUIS ❌ No match for '{restaurant_name}' ({total} results, top: {records[0].get('name')})")
 
         except Exception as e:
-            print(f"  ⚠️ MUIS check error: {e}")
-            result["snippets"].append(f"Error checking MUIS directory: {str(e)}")
+            print(f"  ⚠️  MUIS API error: {e}")
+            result["snippets"].append(f"MUIS API error: {str(e)}")
 
         return result
 
