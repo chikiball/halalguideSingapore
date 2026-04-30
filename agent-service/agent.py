@@ -74,7 +74,6 @@ class HalalAgent:
     async def _call_llm(self, system: str, user: str, json_mode: bool = False) -> str:
         """
         Call Ollama's chat API directly via httpx.
-        Using direct API instead of LangChain for simplicity + reliability.
 
         Args:
             system: System prompt
@@ -84,6 +83,28 @@ class HalalAgent:
         Returns:
             LLM response text
         """
+        # Track call count for logging
+        if not hasattr(self, '_llm_call_count'):
+            self._llm_call_count = 0
+        self._llm_call_count += 1
+        call_id = self._llm_call_count
+
+        # Log what we're sending to the LLM
+        print(f"\n{'='*60}")
+        print(f"  🧠 LLM CALL #{call_id} | model={self.model} | json_mode={json_mode}")
+        print(f"{'='*60}")
+        print(f"  📋 SYSTEM PROMPT ({len(system)} chars):")
+        for line in system.split('\n')[:10]:
+            print(f"    | {line}")
+        if system.count('\n') > 10:
+            print(f"    | ... ({system.count(chr(10)) - 10} more lines)")
+        print(f"  📝 USER PROMPT ({len(user)} chars):")
+        for line in user.split('\n')[:20]:
+            print(f"    | {line}")
+        if user.count('\n') > 20:
+            print(f"    | ... ({user.count(chr(10)) - 20} more lines)")
+        print(f"  ⏳ Calling Ollama...")
+
         payload = {
             "model": self.model,
             "messages": [
@@ -110,10 +131,21 @@ class HalalAgent:
                 )
                 resp.raise_for_status()
                 data = resp.json()
-                return data.get("message", {}).get("content", "")
+                response_text = data.get("message", {}).get("content", "")
+
+                # Log the response
+                duration = data.get("total_duration", 0) / 1e9  # nanoseconds to seconds
+                print(f"  ✅ LLM RESPONSE #{call_id} ({len(response_text)} chars, {duration:.1f}s):")
+                for line in response_text.split('\n')[:15]:
+                    print(f"    | {line}")
+                if response_text.count('\n') > 15:
+                    print(f"    | ... ({response_text.count(chr(10)) - 15} more lines)")
+                print(f"{'='*60}\n")
+
+                return response_text
 
         except Exception as e:
-            print(f"  ⚠️ LLM call failed: {e}")
+            print(f"  ⚠️ LLM CALL #{call_id} FAILED: {e}")
             return ""
 
     # ═══════════════════════════════════════════════════════════════
