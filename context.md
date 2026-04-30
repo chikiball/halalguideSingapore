@@ -183,10 +183,53 @@ For each restaurant, the Python agent runs:
 - Direct scrape halaltag.com and halaltrip.com search pages
 - Extract: text, images, og:image, halal mentions, prices, phone, hours
 
-#### 3c. MUIS Directory Check
+#### 3c. MUIS Official API Check
 
-- Scrape MUIS halal certification page
-- Search for restaurant name in certified list
+**This is now a real-time query against the MUIS e-Service database** (not a scrape).
+
+```
+Step 1: GET halal.muis.gov.sg/halal/establishments
+        → extract session cookie + CSRF token from hidden __RequestVerificationToken input
+
+Step 2: POST halal.muis.gov.sg/api/halal/establishments
+        Headers: X-CSRF-TOKEN, session cookie, X-Requested-With: XMLHttpRequest
+        Body:    {"text": "restaurant name"}
+
+Step 3: JSON response parsed → name matching → definitive result
+```
+
+Response format:
+```json
+{
+  "totalRecords": 155,
+  "data": [
+    {
+      "name": "McDonald's",
+      "number": "EERN20020010957",
+      "address": "6 RAFFLES BOULEVARD #02-156 MARINA SQUARE 039594",
+      "schemeText": "Eating Establishment",
+      "subSchemeText": "Restaurant"
+    }
+  ]
+}
+```
+
+LLM evidence when certified:
+```
+MUIS CHECK: ✅ OFFICIALLY CERTIFIED
+  Certificate Number: EERN20020010957
+  Certified Name: McDonald's
+  Address: 6 RAFFLES BOULEVARD #02-156 MARINA SQUARE
+  Scheme: Eating Establishment — Restaurant
+```
+
+LLM evidence when not found:
+```
+MUIS CHECK: ❌ Not found in MUIS directory (searched 155 records)
+  (MUIS result: McDonald's Tampines | EEFK20230000680 | 9 TAMPINES AVE 2)
+```
+
+**Why the old check always failed:** The previous implementation tried to scrape `www.muis.gov.sg/Halal/Halal-Certificates` which returns 403 (blocked by CloudFront) and uses JS rendering, so BeautifulSoup never saw any restaurant data.
 
 #### 3d. LLM Classification (Ollama llama3.1)
 
@@ -267,8 +310,25 @@ Cloudflare → tunnel → nginx-gateway
 Dark terminal panel at bottom showing real-time pipeline:
 - All OSM results with distance + type + cuisine
 - AI research progress per restaurant
-- Classification results with confidence
+- Classification results with confidence + reasoning
+- **Full LLM prompts and responses** (system prompt + user prompt + response + duration)
 - Copy all logs to clipboard
+
+LLM prompts visible in debug panel (per restaurant tap):
+```
+[LLM] 📡 2 LLM call(s) made for this restaurant:
+[LLM] ━━━ LLM Call #1 (12.4s, json=true) ━━━
+[LLM] 📋 SYSTEM: You are a halal food researcher for Singapore...
+[LLM] 📝 USER: Based on the following evidence about "McDonald's":
+       MUIS CHECK: ✅ OFFICIALLY CERTIFIED
+       Certificate Number: EERN20020010957...
+[LLM] ✅ RESPONSE: {"status":"halal_certified","confidence":"high"...
+```
+
+Also viewable in Docker logs:
+```bash
+sudo docker logs halal-agent -f --tail 50
+```
 
 ---
 
@@ -343,12 +403,16 @@ sudo docker compose up -d app agent
 - **SG address format:** "Blk" prefix partially fixed with regex, some addresses still fail
 - **No persistent cache:** AI results reset on container restart
 - **Browser caching:** JS files need manual cache-busting (`?v=N`) after updates
+- **MUIS session:** CSRF token fetched per restaurant — adds ~2s per check (can be optimised with session caching)
+
+### Fixed issues
+- ~~**MUIS check always returned false**~~ → Fixed: now queries official MUIS API with CSRF auth, returns real cert numbers
 
 ### Future improvements
 - **Redis/file cache** — persist AI results across restarts
+- **MUIS session cache** — reuse session cookie across restaurants in same search batch
 - **Pre-crawl popular areas** — cache Bugis, Kampong Glam, Geylang Serai
 - **Upgrade to llama3.1:70b** — better classification (needs ~48GB RAM)
-- **MUIS API** — if official API becomes available
 - **User contributions** — "Suggest a place" feature
 - **Prayer times** — nearby mosque integration
 - **Offline mode** — service worker
