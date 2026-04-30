@@ -352,6 +352,18 @@
       if (data.images?.length) {
         log("info", `🖼️ ${data.images.length} images found`);
       }
+
+      // Show LLM calls if present (from agent debug)
+      if (data.llm_calls && data.llm_calls.length > 0) {
+        log("llm", `📡 ${data.llm_calls.length} LLM call(s) made for this restaurant:`);
+        data.llm_calls.forEach((call, i) => {
+          log("llm", `━━━ LLM Call #${call.call_id || i + 1} (${call.duration_s || "?"}s, json=${call.json_mode || false}) ━━━`);
+          log("llm", `📋 SYSTEM: ${(call.system_prompt || "").substring(0, 200)}${(call.system_prompt || "").length > 200 ? "..." : ""}`);
+          log("llm", `📝 USER: ${(call.user_prompt || "").substring(0, 300)}${(call.user_prompt || "").length > 300 ? "..." : ""}`);
+          log("llm", `✅ RESPONSE: ${(call.response || "").substring(0, 300)}${(call.response || "").length > 300 ? "..." : ""}`);
+        });
+      }
+
       return;
     }
 

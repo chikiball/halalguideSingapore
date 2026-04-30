@@ -66,6 +66,8 @@ class HalalAgent:
 
         # In-memory cache
         self._cache: Dict[str, Any] = {}
+        # LLM call log (for debug panel)
+        self._llm_calls: List[Dict] = []
 
         print(f"🤖 HalalAgent initialized | model={model}")
 
@@ -141,6 +143,19 @@ class HalalAgent:
                 if response_text.count('\n') > 15:
                     print(f"    | ... ({response_text.count(chr(10)) - 15} more lines)")
                 print(f"{'='*60}\n")
+
+                # Store for debug panel
+                self._llm_calls.append({
+                    "call_id": call_id,
+                    "system_prompt": system[:500],
+                    "user_prompt": user[:2000],
+                    "response": response_text[:1500],
+                    "duration_s": round(duration, 1),
+                    "json_mode": json_mode,
+                })
+                # Keep only last 10 calls
+                if len(self._llm_calls) > 10:
+                    self._llm_calls = self._llm_calls[-10:]
 
                 return response_text
 
@@ -488,7 +503,11 @@ Return ONLY a JSON object:
             "classification": classification,
             "evidence": evidence,
             "images": evidence["images"][:5],
+            "llm_calls": list(self._llm_calls),  # include LLM calls for debug
         }
+
+        # Clear calls for next restaurant
+        self._llm_calls = []
 
         print(f"✅ Phase 2 complete: '{name}' → {classification.get('label')} ({classification.get('confidence')})")
 
