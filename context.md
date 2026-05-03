@@ -1,6 +1,6 @@
 # Halal Guide Singapore — Project Context
 
-> Last updated: 2026-04-29
+> Last updated: 2026-05-03
 > Repo: `https://github.com/chikiball/halalguideSingapore.git`
 > Local: `/Users/nandha_handharu/Documents/Nandha/GitHub/halalguideSingapore`
 > Server: `/home/nandha/server/sites/halalguideSingapore` (Ubuntu home server)
@@ -21,15 +21,16 @@ User picks location (GPS or tap map)
 ✨ "AI is performing search for halal food..."
     ↓ ~2 seconds
 OSM (Overpass API) finds ALL food places within radius
-    ↓ instant
-Cards + map markers appear immediately (⚪ Checking...)
     ↓ parallel, per restaurant (~15s each)
 AI agent researches each place:
   SearXNG (11 queries) → scrape websites → check MUIS → scrape halaltag.com
     ↓
+🚫 Pork pre-filter: regex scan of evidence — if pork menu items detected
+   (and no "no pork / halal certified" denial language), place is excluded
+    ↓ (excluded places silently dropped — no card, no LLM call)
 LLM (llama3.1) classifies halal status + extracts facts
-    ↓ cards update one by one
-Badges change: ⚪ → ☪️ Halal Certified / 🟢 Muslim Owned / etc.
+    ↓ cards appear one by one (verified places only)
+Badges shown immediately on card render: ☪️ Halal Certified / 🟢 Muslim Owned / etc.
     ↓ user taps card
 LLM writes warm 150-250 word article + images shown in modal
 ```
@@ -231,15 +232,26 @@ MUIS CHECK: ❌ Not found in MUIS directory (searched 155 records)
 
 **Why the old check always failed:** The previous implementation tried to scrape `www.muis.gov.sg/Halal/Halal-Certificates` which returns 403 (blocked by CloudFront) and uses JS rendering, so BeautifulSoup never saw any restaurant data.
 
-#### 3d. LLM Classification (Ollama llama3.1)
+#### 3d. Pork Pre-Filter (before LLM)
+
+Before calling the LLM, the compiled evidence text is scanned with regex:
+
+- **Pork-serving signals:** specific menu items — `pork belly`, `pork ribs`, `char siew`, `bak kut teh`, `roast pork`, `sio bak`, `pulled pork`, `pork lard`, `serves pork`, `contains pork`, etc.
+- **Denial signals:** `no pork`, `pork-free`, `no lard`, `halal certified`, `muis certified`, `muis halal`
+
+**Logic:** if pork-serving signal found **and** no denial signal present → `excluded: True`. The LLM call and article writing are skipped entirely. The place is never shown to the user.
+
+This saves ~15s per excluded place and keeps results clean without needing LLM judgment.
+
+#### 3e. LLM Classification (Ollama llama3.1)
 
 All evidence sent to LLM with structured prompt. Returns:
 - Status (7 categories), confidence (high/medium/low), reasoning
 - Cuisine, price range, popular dishes, hours, phone, website
 
-### Step 4: Cards Update Progressively
+### Step 4: Cards Appear Progressively (verified places only)
 
-Badges change from "⚪ Checking..." to classification result. Status bar shows progress: "✨ Researching... 5/35 places done"
+Cards and map markers are rendered **only after a place passes the pork pre-filter**. There is no "instant cards then update badges" phase — each card appears already carrying its halal badge. Status bar shows live progress: "Found X places... (Y/N checked)" and a final note "(Z non-halal filtered out)" if any were excluded.
 
 ### Step 5: Article Writing (on card tap)
 
@@ -288,10 +300,12 @@ Cloudflare → tunnel → nginx-gateway
 ### Single search flow (no mode toggle)
 
 1. User picks location (GPS or map tap)
-2. Taps Search → pulsating ✨ "AI is performing search for halal food..."
-3. Cards appear instantly from OSM (⚪ Checking...)
-4. Cards update one-by-one as AI finishes (badge + confidence)
-5. Tap card → modal: images + article + halal assessment + directions
+2. Taps Search → pulsating ✨ "Checking N places for halal status..."
+3. Research runs in parallel for all OSM places (no immediate card render)
+4. Cards appear one by one as each place passes the pork pre-filter
+5. Each card shows its halal badge immediately (no "⚪ Checking..." phase)
+6. Tap card → modal: images + article + halal assessment + directions
+7. Status bar shows final count + "(Z non-halal filtered out)" if any excluded
 
 ### Files
 
@@ -407,6 +421,7 @@ sudo docker compose up -d app agent
 
 ### Fixed issues
 - ~~**MUIS check always returned false**~~ → Fixed: now queries official MUIS API with CSRF auth, returns real cert numbers
+- ~~**Non-halal places shown to users**~~ → Fixed: pork pre-filter (`_has_pork_evidence`) screens evidence before LLM call; excluded places never rendered
 
 ### Future improvements
 - **Redis/file cache** — persist AI results across restarts
