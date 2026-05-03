@@ -1,6 +1,6 @@
 # Halal Guide Singapore — Project Context
 
-> Last updated: 2026-05-03
+> Last updated: 2026-05-03 (image validation)
 > Repo: `https://github.com/chikiball/halalguideSingapore.git`
 > Local: `/Users/nandha_handharu/Documents/Nandha/GitHub/halalguideSingapore`
 > Server: `/home/nandha/server/sites/halalguideSingapore` (Ubuntu home server)
@@ -249,7 +249,22 @@ All evidence sent to LLM with structured prompt. Returns:
 - Status (7 categories), confidence (high/medium/low), reasoning
 - Cuisine, price range, popular dishes, hours, phone, website
 
-### Step 4: Cards Appear Progressively (verified places only)
+#### 3f. Image Validation (text LLM, batched)
+
+After classification, all scraped `og_image` URLs are validated in a single LLM call. For each image the LLM receives:
+- Image URL path
+- Page title (caption)
+- Source domain
+
+The LLM keeps images that are food/restaurant photos and removes logos, halal certificates, government banners, maps, and unrelated images. Returns `[{"index": 0, "keep": true}, ...]`.
+
+**Fallback chain if all images rejected:**
+1. `ImageFinderTool.find_images()` — SearXNG image search for `"{name} Singapore restaurant food"`
+2. Cuisine-based Unsplash fallback (already in `image_finder.py`)
+
+**Fail-safe:** if LLM response can't be parsed, original images are kept unchanged.
+
+Note: `ImageFinderTool` is initialised in `HalalAgent.__init__` but previously unused — it now serves as the fallback image source when validation rejects everything.
 
 Cards and map markers are rendered **only after a place passes the pork pre-filter**. There is no "instant cards then update badges" phase — each card appears already carrying its halal badge. Status bar shows live progress: "Found X places... (Y/N checked)" and a final note "(Z non-halal filtered out)" if any were excluded.
 
@@ -422,6 +437,7 @@ sudo docker compose up -d app agent
 ### Fixed issues
 - ~~**MUIS check always returned false**~~ → Fixed: now queries official MUIS API with CSRF auth, returns real cert numbers
 - ~~**Non-halal places shown to users**~~ → Fixed: pork pre-filter (`_has_pork_evidence`) screens evidence before LLM call; excluded places never rendered
+- ~~**Unvalidated images shown in modal**~~ → Fixed: text LLM screens all scraped og_image URLs before they reach the frontend; irrelevant images fall back to SearXNG image search
 
 ### Future improvements
 - **Redis/file cache** — persist AI results across restarts
