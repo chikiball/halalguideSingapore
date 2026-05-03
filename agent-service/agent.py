@@ -514,10 +514,21 @@ Return ONLY a JSON object:
             classification["icon"] = "⚪"
             classification["badge_color"] = "gray"
 
+        # 7. Validate images — filter out logos, certs, unrelated images via LLM
+        raw_images = evidence["images"][:5]
+        validated_images = await self._validate_images_with_llm(name, raw_images)
+        if not validated_images:
+            cuisine = classification.get("cuisine", place.get("cuisine", ""))
+            website = classification.get("website", place.get("website", ""))
+            validated_images = await self.image_finder.find_images(
+                name, cuisine=cuisine, website_url=website, max_images=3
+            )
+            print(f"  🖼️ All scraped images rejected — found {len(validated_images)} via image search fallback")
+
         research = {
             "classification": classification,
             "evidence": evidence,
-            "images": evidence["images"][:5],
+            "images": validated_images,
             "llm_calls": list(self._llm_calls),  # include LLM calls for debug
         }
 
@@ -603,6 +614,51 @@ Return ONLY a JSON object:
         return article
 
     # ─── Helper methods ───────────────────────────────────────────
+
+    async def _validate_images_with_llm(self, name: str, images: List[Dict]) -> List[Dict]:
+        """
+        Ask the text LLM to keep only images that are likely food/restaurant photos.
+        Uses URL path, page title, and source domain as signals — no vision model needed.
+        Falls back to returning original list if LLM parsing fails (fail-safe).
+        """
+        if not images:
+            return []
+
+        lines = []
+        for i, img in enumerate(images):
+            url = img.get("url", "")[:120]
+            caption = img.get("caption", "")[:80]
+            # Extract domain from source URL cheaply
+            source = img.get("source", "")
+            domain = source.split("/")[2] if source.startswith("http") and len(source.split("/")) > 2 else source[:50]
+            lines.append(f'[{i}] URL: {url}\n    Page: "{caption}" ({domain})')
+
+        images_text = "\n".join(lines)
+
+        prompt = f"""Restaurant: "{name}"
+
+For each image, decide if it is likely a photo of food, a dish, a meal, or the restaurant interior.
+Remove it if the URL or page context suggests it is a logo, halal certificate, government banner, map, social media icon, or anything unrelated to food or dining.
+
+{images_text}
+
+Return ONLY a JSON array (one entry per image):
+[{{"index": 0, "keep": true}}, {{"index": 1, "keep": false}}, ...]"""
+
+        system = "You review image metadata for a restaurant guide. Decide which images are food or restaurant photos based on the URL path and page context."
+
+        response = await self._call_llm(system=system, user=prompt, json_mode=True)
+
+        try:
+            decisions = self._parse_json_array(response)
+            keep_indices = {d["index"] for d in decisions if d.get("keep")}
+            filtered = [img for i, img in enumerate(images) if i in keep_indices]
+            print(f"  🖼️ Image validation: {len(images)} → {len(filtered)} kept")
+            return filtered
+        except Exception:
+            # Fail safe — return originals unchanged if LLM response can't be parsed
+            print(f"  ⚠️ Image validation LLM parse failed — keeping all {len(images)} images")
+            return images
 
     def _has_pork_evidence(self, evidence_text: str) -> bool:
         """
