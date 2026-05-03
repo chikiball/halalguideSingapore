@@ -114,6 +114,10 @@ async def place_details(req: DetailRequest):
             research = await agent.research_place(req.dict())
             yield {"event": "research", "data": json.dumps(research)}
 
+            if research.get("excluded"):
+                yield {"event": "done", "data": json.dumps({"name": req.name, "excluded": True})}
+                return
+
             yield {"event": "status", "data": json.dumps({"phase": "writing", "message": f"Writing article for {req.name}..."})}
 
             article = await agent.write_article(req.dict(), research)

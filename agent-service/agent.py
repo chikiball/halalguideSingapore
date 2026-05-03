@@ -454,9 +454,24 @@ Search results:
                 })
                 print(f"  📗 Halal directory: {page['url'][:60]} ({len(page['text'])} chars)")
 
-        # 5. LLM classification
+        # 5. Pork pre-filter — skip LLM entirely if evidence shows pork is served
         evidence_text = self._format_evidence(name, place, evidence)
 
+        if self._has_pork_evidence(evidence_text):
+            print(f"🚫 Phase 2: '{name}' excluded — pork evidence detected, skipping LLM")
+            result = {
+                "excluded": True,
+                "exclusion_reason": "pork_establishment",
+                "classification": {
+                    "status": "excluded",
+                    "confidence": "medium",
+                    "reasoning": "Evidence indicates this establishment serves pork products.",
+                },
+            }
+            self._cache[cache_key] = result
+            return result
+
+        # 6. LLM classification
         classification_prompt = f"""Based on the following evidence about "{name}", classify its halal status and extract key facts.
 
 {evidence_text}
@@ -588,6 +603,41 @@ Return ONLY a JSON object:
         return article
 
     # ─── Helper methods ───────────────────────────────────────────
+
+    def _has_pork_evidence(self, evidence_text: str) -> bool:
+        """
+        Returns True only if evidence positively shows pork is served.
+        Avoids false positives from halal-signal phrases like "no pork no lard".
+        """
+        text = evidence_text.lower()
+
+        # Denial / halal-signal patterns — if present, don't exclude
+        denial_re = re.compile(
+            r'\bno\s+pork\b|\bpork.?free\b|\bwithout\s+pork\b'
+            r'|\bno\s+lard\b|\blard.?free\b'
+            r'|\bdoes\s+not\s+(serve|use|contain)\s+pork\b'
+            r'|\bhalal\s+certified\b|\bmuis\s+certified\b|\bmuis\s+halal\b',
+            re.IGNORECASE,
+        )
+
+        # Positive pork-serving signals — specific menu items or explicit statements
+        pork_re = re.compile(
+            r'\bpork\s+(belly|rib|ribs|chop|chops|knuckle|satay|bun|buns|dumpling|dumplings|noodle|noodles|broth|soup|floss|rice)\b'
+            r'|\b(char\s*siew|charsiew|crispy\s+pork|roast\s+pork|bak\s+kut\s+teh|bbq\s+pork|pork\s+bbq|sio\s+bak)\b'
+            r'|\b(bacon\s+(burger|sandwich|wrap|egg|bits)|pulled\s+pork|pork\s+lard)\b'
+            r'|\bserve[sd]?\s+pork\b|\bpork\s+(is\s+)?(available|served|on\s+(the\s+)?menu)\b'
+            r'|\bcontains?\s+pork\b',
+            re.IGNORECASE,
+        )
+
+        if not pork_re.search(text):
+            return False
+
+        # If denial language is also present, trust the halal signal over the pork match
+        if denial_re.search(text):
+            return False
+
+        return True
 
     def _get_area_keywords(self, area_name: str, area_info: Optional[Dict]) -> List[str]:
         """Generate area-specific keywords for pre-filtering search results."""

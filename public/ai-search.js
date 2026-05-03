@@ -182,69 +182,80 @@
         return;
       }
 
-      // Store reference
-      currentPlaces = places;
-      window.places = places; // for the original modal to work
+      // osmPlaces = full OSM list; currentPlaces = verified (non-pork) subset built progressively
+      const osmPlaces = places;
+      currentPlaces = [];
+      window.places = currentPlaces;
 
       statusBar.innerHTML = `
         <div class="ai-loading-bar">
           <span class="pulse">✨</span>
-          Found ${places.length} places — AI is researching halal status...
+          Checking ${osmPlaces.length} places for halal status...
         </div>
       `;
 
-      // ───── STEP 2: Render cards + map markers immediately ─────
-      places.forEach((place, i) => {
-        renderHybridCard(place, i, cardsEl);
+      // ───── STEP 2: Research all places; render card only when verified ─────
+      _dbg("phase", `🔬 Checking ${osmPlaces.length} places — cards will appear as each is verified...`);
+      let checkedCount = 0;
 
-        if (window.markersLayer && window.L) {
-          const icon = L.divIcon({
-            className: "",
-            html: '<div style="width:30px;height:30px;background:#1a6b4a;border:2px solid white;border-radius:50%;box-shadow:0 2px 8px rgba(0,0,0,0.2);display:flex;align-items:center;justify-content:center;font-size:15px;">🍽️</div>',
-            iconSize: [30, 30],
-            iconAnchor: [15, 15],
-          });
-          const marker = L.marker([place.lat, place.lng], { icon: icon })
-            .addTo(window.markersLayer)
-            .bindPopup("<b>" + escHtml(place.name) + "</b>");
-          marker.on("click", function () { openHybridModal(i); });
-        }
-      });
-
-      // Fit map bounds
-      if (window.map && window.L) {
-        const bounds = L.latLngBounds(places.map((p) => [p.lat, p.lng]));
-        bounds.extend([lat, lng]);
-        map.fitBounds(bounds, { padding: [40, 40] });
-      }
-
-      // ───── STEP 3: AI research on each place (background) ─────
-      _dbg("phase", `🔬 Starting AI research on ${places.length} places...`);
-      let researchedCount = 0;
-      const researchPromises = places.map(async (place, i) => {
+      const researchPromises = osmPlaces.map(async (place, i) => {
         try {
-          _dbg("research", `🔬 [${i + 1}/${places.length}] Researching: ${place.name}...`);
+          _dbg("research", `🔬 [${i + 1}/${osmPlaces.length}] Researching: ${place.name}...`);
           const result = await researchPlace(place);
-          researchedCount++;
+          checkedCount++;
 
-          // Update card badge
+          if (result && result.excluded) {
+            _dbg("research", `🚫 [${i + 1}] ${place.name} → excluded (pork evidence)`);
+            statusBar.innerHTML = `
+              <div class="ai-loading-bar">
+                <span class="pulse">✨</span>
+                Checking... ${checkedCount}/${osmPlaces.length} done, ${currentPlaces.length} verified
+              </div>
+            `;
+            return;
+          }
+
+          // Assign stable index at render time — currentPlaces only grows, never shrinks
+          const cardIndex = currentPlaces.length;
+          currentPlaces.push(place);
+
+          if (result && result.classification) {
+            place.halalStatus = result.classification.status;
+            place.aiClassification = result.classification;
+          }
+
+          renderHybridCard(place, cardIndex, cardsEl);
+
+          if (window.markersLayer && window.L) {
+            const icon = L.divIcon({
+              className: "",
+              html: '<div style="width:30px;height:30px;background:#1a6b4a;border:2px solid white;border-radius:50%;box-shadow:0 2px 8px rgba(0,0,0,0.2);display:flex;align-items:center;justify-content:center;font-size:15px;">🍽️</div>',
+              iconSize: [30, 30],
+              iconAnchor: [15, 15],
+            });
+            const marker = L.marker([place.lat, place.lng], { icon: icon })
+              .addTo(window.markersLayer)
+              .bindPopup("<b>" + escHtml(place.name) + "</b>");
+            marker.on("click", function () { openHybridModal(cardIndex); });
+          }
+
           if (result && result.classification) {
             const cls = result.classification;
             const badge = AI_BADGES[cls.status] || AI_BADGES.unverified;
             _dbg("research", `✅ [${i + 1}] ${place.name} → ${badge.icon} ${badge.label} (${cls.confidence || "?"} confidence)`);
-            updateCardBadge(i, result.classification);
+            updateCardBadge(cardIndex, cls);
           } else {
             _dbg("research", `⚪ [${i + 1}] ${place.name} → no classification`);
           }
 
-          // Update status
           statusBar.innerHTML = `
             <div class="ai-loading-bar">
               <span class="pulse">✨</span>
-              Researching... ${researchedCount}/${places.length} places done
+              Found ${currentPlaces.length} place${currentPlaces.length !== 1 ? "s" : ""}... (${checkedCount}/${osmPlaces.length} checked)
             </div>
           `;
         } catch (e) {
+          checkedCount++;
           console.warn("Research failed for", place.name, e);
         }
       });
@@ -252,8 +263,22 @@
       // Wait for all research to complete
       await Promise.all(researchPromises);
 
+      // Fit map to verified places only
+      if (window.map && window.L && currentPlaces.length > 0) {
+        const bounds = L.latLngBounds(currentPlaces.map((p) => [p.lat, p.lng]));
+        bounds.extend([lat, lng]);
+        map.fitBounds(bounds, { padding: [40, 40] });
+      }
+
       // Final status
-      statusBar.innerHTML = `Found <span class="count">${places.length}</span> place${places.length > 1 ? "s" : ""} — AI research complete ✨`;
+      if (currentPlaces.length === 0) {
+        emptyState.classList.add("active");
+        statusBar.innerHTML = "No halal-friendly places found nearby. Try a larger radius.";
+      } else {
+        const excluded = osmPlaces.length - currentPlaces.length;
+        const excludedNote = excluded > 0 ? ` (${excluded} non-halal filtered out)` : "";
+        statusBar.innerHTML = `Found <span class="count">${currentPlaces.length}</span> place${currentPlaces.length > 1 ? "s" : ""} — AI research complete ✨${excludedNote}`;
+      }
 
     } catch (err) {
       statusBar.innerHTML = `⚠️ ${err.message}`;
