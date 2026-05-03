@@ -45,7 +45,7 @@ LLM writes warm 150-250 word article + images shown in modal
 | 🗺️ Pick on Map | Tap map to drop a draggable pin with "🔍 Search here" button |
 | 🔍 Hybrid Search | OSM for geography + AI for halal intelligence |
 | ✨ Pulsating Loading | "AI is performing search for halal food..." with animated ✨ |
-| 🃏 Progressive Cards | Appear instantly from OSM, badges update as AI finishes |
+| 🃏 Progressive Cards | Appear one by one as each place passes the pork pre-filter, badge shown immediately |
 | ☪️ 7 Halal Categories | Certified, Muslim Owned, No Pork No Lard, Halal Friendly, Vegetarian, Vegan, Unverified |
 | 📰 AI Articles | LLM-written 150-250 word articles grounded in real evidence |
 | 🖼️ Image Gallery | Website photos → SearXNG images → cuisine fallback |
@@ -153,10 +153,11 @@ halalguideSingapore/
 - 3 mirror fallback: kumi → mail.ru → overpass-api.de
 - Returns restaurants, fast food, cafes, food courts within radius with real coordinates
 
-### Step 2: Cards + Map Appear Instantly
+### Step 2: AI Research Runs in Parallel (no cards yet)
 
-- Cards rendered with "⚪ Checking..." badge and "✨ AI researching halal status..."
-- Map markers placed at real OSM coordinates
+- All OSM places are held in memory — nothing rendered to the user
+- Status bar shows "Checking N places for halal status..."
+- Research runs in parallel for all places (~15s each)
 
 ### Step 3: AI Agent Researches Each Place (parallel, ~15s each)
 
