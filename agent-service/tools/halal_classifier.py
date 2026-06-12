@@ -49,8 +49,8 @@ HALAL_CATEGORIES = {
 
 
 class HalalClassifier:
-    def __init__(self, ollama_url: str, model: str):
-        self.ollama_url = ollama_url
+    def __init__(self, base_url: str, model: str):
+        self.base_url = base_url
         self.model = model
         self.categories = HALAL_CATEGORIES
         print(f"  ☪️  HalalClassifier ready | model={model}")

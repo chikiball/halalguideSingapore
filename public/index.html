@@ -607,6 +607,9 @@
   <!-- Leaflet JS -->
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
+  <!-- Client config (defines window.MAPBOX_TOKEN; served by server.js from env) -->
+  <script src="/config.js"></script>
+
   <script>
     let map, userMarker, pickedMarker, markersLayer;
     let userLat, userLng;       // GPS position (if available)
@@ -740,13 +743,31 @@
         attributionControl: false,
       }).setView([searchLat, searchLng], 15);
 
-      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        maxZoom: 19,
-      }).addTo(map);
+      // Mapbox Streets raster tiles for the look; falls back to raw OSM
+      // tiles if no token is configured (window.MAPBOX_TOKEN from /config.js).
+      if (window.MAPBOX_TOKEN) {
+        L.tileLayer(
+          "https://api.mapbox.com/styles/v1/mapbox/streets-v12/tiles/{z}/{x}/{y}@2x?access_token=" +
+            window.MAPBOX_TOKEN,
+          {
+            maxZoom: 22,
+            tileSize: 512,
+            zoomOffset: -1,
+          }
+        ).addTo(map);
 
-      L.control.attribution({ position: "bottomright", prefix: false })
-        .addAttribution('© <a href="https://osm.org/copyright">OpenStreetMap</a>')
-        .addTo(map);
+        L.control.attribution({ position: "bottomright", prefix: false })
+          .addAttribution('© <a href="https://www.mapbox.com/about/maps/">Mapbox</a> © <a href="https://osm.org/copyright">OpenStreetMap</a>')
+          .addTo(map);
+      } else {
+        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+          maxZoom: 19,
+        }).addTo(map);
+
+        L.control.attribution({ position: "bottomright", prefix: false })
+          .addAttribution('© <a href="https://osm.org/copyright">OpenStreetMap</a>')
+          .addTo(map);
+      }
 
       L.control.zoom({ position: "topright" }).addTo(map);
 

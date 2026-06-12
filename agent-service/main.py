@@ -14,10 +14,11 @@ from agent import HalalAgent
 
 app = FastAPI(title="Halal Guide SG Agent", version="1.0.0", docs_url="/docs")
 
-OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
+DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
+DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
 SEARXNG_URL = os.getenv("SEARXNG_URL", "http://localhost:8888")
 NOMINATIM_URL = os.getenv("NOMINATIM_URL", "https://nominatim.openstreetmap.org")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.1:latest")
 
 agent: Optional[HalalAgent] = None
 
@@ -25,18 +26,28 @@ agent: Optional[HalalAgent] = None
 @app.on_event("startup")
 async def startup():
     global agent
+    if not DEEPSEEK_API_KEY:
+        print("⚠️ DEEPSEEK_API_KEY is not set — LLM calls will fail (401).")
     agent = HalalAgent(
-        ollama_url=OLLAMA_URL,
+        api_key=DEEPSEEK_API_KEY,
+        base_url=DEEPSEEK_BASE_URL,
         searxng_url=SEARXNG_URL,
         nominatim_url=NOMINATIM_URL,
-        model=OLLAMA_MODEL,
+        model=DEEPSEEK_MODEL,
     )
-    print(f"🤖 Agent ready | Ollama: {OLLAMA_URL} | SearXNG: {SEARXNG_URL}")
+    print(f"🤖 Agent ready | DeepSeek: {DEEPSEEK_BASE_URL} ({DEEPSEEK_MODEL}) | SearXNG: {SEARXNG_URL}")
 
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "ollama_url": OLLAMA_URL, "searxng_url": SEARXNG_URL, "model": "llama3.1:8b"}
+    return {
+        "status": "ok",
+        "provider": "deepseek",
+        "base_url": DEEPSEEK_BASE_URL,
+        "searxng_url": SEARXNG_URL,
+        "model": DEEPSEEK_MODEL,
+        "api_key_set": bool(DEEPSEEK_API_KEY),
+    }
 
 
 class SearchRequest(BaseModel):

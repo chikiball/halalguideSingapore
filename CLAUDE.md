@@ -12,9 +12,9 @@ npm start          # http://localhost:3000
 
 **Full stack (with AI agent):**
 ```bash
+cp .env.example .env   # then fill in DEEPSEEK_API_KEY and MAPBOX_TOKEN
 docker compose up -d
 # Requires an external Docker network: docker network create server-net
-# Requires Ollama running on server-net at ollama:11434 with llama3.1:latest pulled
 ```
 
 **Agent logs (most useful for debugging):**
@@ -41,13 +41,30 @@ For agent-only rebuilds: `sudo docker compose up -d --build agent`
 
 ### Two-Layer Backend
 
-The Node.js app (`server.js` + `ai-routes.js`) is a thin proxy. All AI logic lives in the Python FastAPI microservice (`agent-service/`). Node.js SSE-proxies requests to Python verbatim — `ai-routes.js:_proxySSE()` pipes bytes directly with no buffering.
+The Node.js app does two jobs: (1) it owns the **OSM/Overpass data layer** (`server.js` + `crawler.js`), and (2) it is a **thin SSE proxy** to the AI agent (`ai-routes.js`). All AI logic lives in the Python FastAPI microservice (`agent-service/`). Node.js SSE-proxies AI requests to Python verbatim — `ai-routes.js:_proxySSE()` pipes bytes directly with no buffering.
+
+### OSM Discovery Layer (`server.js`) — the hybrid flow's real Phase 1
+
+The "main hybrid flow" the frontend uses does **not** call the AI agent's Phase 1. Instead:
+
+- **`GET /api/halal`** (`server.js`) queries the **Overpass API** with a 3-mirror fallback chain (`OVERPASS_ENDPOINTS`), fetches all food amenities in radius, then filters server-side with the `isHalalFriendly` heuristic (explicit `diet:halal`/`halal` tags, else cuisine/name regex `HALAL_CUISINE_RE`/`HALAL_NAME_RE`). Returns places with **real coordinates** — this is what gives the hybrid flow its geographic accuracy.
+- The frontend (`public/ai-search.js`) takes those OSM places and calls the AI agent's `/api/ai/place/details` (Phase 2+3) per place to classify and write articles.
+
+**Two endpoints named `place/details` — do not confuse them:**
+- `POST /api/place/details` → `crawler.js` (non-AI web crawl, in-memory `detailCache`). Legacy/standalone detail fetch.
+- `POST /api/ai/place/details` → proxies to Python agent (Phase 2+3 SSE). Used by the hybrid flow.
+
+### AI Endpoints (`ai-routes.js` → `agent-service/main.py`)
+
+- `POST /api/ai/search` → agent `/search` → Phase 1 Discovery (SSE). Standalone; not on the hybrid hot path.
+- `POST /api/ai/place/details` → agent `/place/details` → Phase 2+3 (SSE).
+- `GET /api/ai/health` → agent `/health`. Agent listens on port 5000 (`AGENT_URL`, default `http://localhost:5000`).
 
 ### Three-Phase Agent Pipeline (`agent-service/agent.py: HalalAgent`)
 
 Every restaurant goes through these phases in sequence:
 
-1. **Phase 1 — Discovery** (`discover_places`): SearXNG search → LLM extracts restaurant names → Nominatim geocodes them → radius filter. Only used when the frontend calls `/api/ai/search` (not the main hybrid flow).
+1. **Phase 1 — Discovery** (`discover_places`): SearXNG search → LLM extracts restaurant names → Nominatim geocodes them → radius filter. Only used by the standalone `/api/ai/search` endpoint — the main hybrid flow does discovery via the OSM layer above, not this.
 
 2. **Phase 2 — Research** (`research_place`): 11 parallel SearXNG queries + scrape top 8 URLs + MUIS API check → compile evidence → **pork pre-filter** (regex, no LLM) → LLM classification → **image validation** (LLM, batched) → return result. This is the hot path called for every card.
 
@@ -69,6 +86,14 @@ Python agent yields Server-Sent Events in order: `status` → `research` → `st
 
 After classification, scraped `og_image` URLs are filtered in one batched LLM call. Passes URL path + page title + source domain per image. If all rejected, falls back to `ImageFinderTool.find_images()` (SearXNG image search), then cuisine-based Unsplash fallbacks. Fail-safe: if LLM response can't be parsed, original images are returned unchanged.
 
+### LLM Calls (`agent.py: _call_llm`)
+
+A single chokepoint — `_call_llm()` — hand-rolls an httpx POST to **DeepSeek's OpenAI-compatible** `/chat/completions` (`Authorization: Bearer $DEEPSEEK_API_KEY`). Every phase (discovery, research classification, image validation, article) routes through it, so the provider lives in one place. `json_mode=True` sets `response_format: {"type":"json_object"}` — DeepSeek requires the word "json" in the prompt, which the existing prompts already satisfy. Responses are parsed from `choices[0].message.content`; the `_parse_json_object`/`_parse_json_array` helpers tolerate malformed output. `HalalClassifier.classify` is a stub and unused.
+
+### Map (`public/index.html: initMap`)
+
+Leaflet 1.9.4 with **Mapbox Streets raster tiles** (`mapbox/streets-v12`). The token comes from `window.MAPBOX_TOKEN`, served by `server.js` at `/config.js` (a blocking classic `<script>` loaded before the inline map script, so it's race-free and the token stays out of git). If `MAPBOX_TOKEN` is unset, `initMap` falls back to raw OSM tiles. Markers/pick-mode are still plain Leaflet (also in `ai-search.js`) — only the basemap changed.
+
 ### MUIS Halal Check (`scraper.py: scrape_muis`)
 
 Two-step: GET the MUIS directory page to extract CSRF token → POST to the JSON API. The old approach (scraping www.muis.gov.sg) always returned 403. Uses `halal.muis.gov.sg/api/halal/establishments`.
@@ -78,16 +103,18 @@ Two-step: GET the MUIS directory page to extract CSRF token → POST to the JSON
 - **`setup-agent-service.sh` creates stub files — NEVER re-run** after real implementations exist. It will overwrite `agent.py`, `main.py`, and all tools with empty stubs.
 - **`setup-step10.sh` patches `index.html` and `server.js`** — it adds `ai-search.js`/`ai-debug.js` script tags and bridges `window.searchLat/searchLng`. It is idempotent and safe to re-run.
 - **JS cache-busting**: after editing `ai-search.js` or `ai-debug.js`, bump the `?v=N` suffix in `index.html`: `sed -i 's/ai-search.js?v=[0-9]*/ai-search.js?v=N/' public/index.html`
-- **Ollama is external** — it lives in the `chatui` Docker stack at container name `ollama` on `server-net`. It is not defined in this repo's `docker-compose.yml`.
+- **DeepSeek is the LLM** — a hosted OpenAI-compatible API, not a local model. `DEEPSEEK_API_KEY` (and `MAPBOX_TOKEN`) live in a gitignored `.env`; see `.env.example`. There is no Ollama/local-model container anymore.
 - **No persistent cache** — all AI research results are in-memory and lost on container restart.
 
-## Key Environment Variables (agent-service)
+## Key Environment Variables
 
-| Variable | Default | Notes |
-|---|---|---|
-| `OLLAMA_URL` | `http://localhost:11434` | Points to `http://ollama:11434` in Docker |
-| `SEARXNG_URL` | `http://localhost:8888` | Points to `http://searxng:8080` in Docker |
-| `OLLAMA_MODEL` | `llama3.1:latest` | 8B model — json_mode enabled for all classification calls |
+| Variable | Service | Default | Notes |
+|---|---|---|---|
+| `DEEPSEEK_API_KEY` | agent | — | **Required.** Bearer token for DeepSeek; from `.env`. |
+| `DEEPSEEK_BASE_URL` | agent | `https://api.deepseek.com` | POSTs to `{base}/chat/completions`. |
+| `DEEPSEEK_MODEL` | agent | `deepseek-chat` | json_mode set via `response_format` for classification calls. |
+| `SEARXNG_URL` | agent | `http://localhost:8888` | Points to `http://searxng:8080` in Docker. |
+| `MAPBOX_TOKEN` | app | — | Public Mapbox token; served to the browser via `/config.js`. Empty → OSM tile fallback. |
 
 ## Debug Mode
 

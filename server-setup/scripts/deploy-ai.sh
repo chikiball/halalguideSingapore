@@ -5,7 +5,7 @@
 #
 # Prerequisites:
 #   - Docker + Docker Compose installed
-#   - Ollama installed with llama3.1:8b pulled
+#   - .env present in the site dir with DEEPSEEK_API_KEY (and MAPBOX_TOKEN)
 #   - server-net Docker network exists
 #   - Cloudflare tunnel configured for halal.nandharu.uk
 # ═══════════════════════════════════════════════════════════════
@@ -37,31 +37,12 @@ if ! docker compose version &>/dev/null; then
 fi
 echo "  ✅ Docker Compose $(docker compose version --short)"
 
-# Ollama (runs as Docker container in chatui stack on server-net)
-if docker ps --format '{{.Names}}' | grep -q "^ollama$"; then
-  echo "  ✅ Ollama container running"
+# DeepSeek API key (LLM is a hosted API — no local model container)
+if grep -q "^DEEPSEEK_API_KEY=.\+" "$SITE_DIR/.env" 2>/dev/null; then
+  echo "  ✅ DEEPSEEK_API_KEY present in .env"
 else
-  echo "❌ Ollama container not found. It should be running in the chatui stack."
-  echo "   Start it: cd /home/nandha/server/sites/chatui && sudo docker compose up -d ollama"
+  echo "❌ DEEPSEEK_API_KEY missing. Create $SITE_DIR/.env from .env.example."
   exit 1
-fi
-
-# Check llama3.1 model
-if docker exec ollama ollama list 2>/dev/null | grep -q "llama3.1"; then
-  echo "  ✅ llama3.1 model available"
-else
-  echo "⚠️  llama3.1 not found. Pulling..."
-  docker exec ollama ollama pull llama3.1:8b
-  echo "  ✅ llama3.1:8b pulled"
-fi
-
-# Verify Ollama API responds on server-net
-if docker exec ollama curl -sf http://localhost:11434/api/tags &>/dev/null; then
-  echo "  ✅ Ollama API responding on :11434"
-else
-  echo "⚠️  Ollama API not responding. Restarting..."
-  cd /home/nandha/server/sites/chatui && docker compose restart ollama
-  sleep 5
 fi
 
 # server-net network
@@ -195,12 +176,12 @@ else
   echo "⚠️ SKIP (internal only, check via: docker exec halal-agent curl http://localhost:5000/health)"
 fi
 
-# Test 5: Ollama (Docker container from chatui stack)
-echo -n "  [5/5] Ollama llama3.1: "
-if docker exec ollama ollama list 2>/dev/null | grep -q "llama3.1"; then
+# Test 5: DeepSeek API key wired into the agent
+echo -n "  [5/5] DeepSeek key: "
+if echo "$AGENT_HEALTH" | grep -q '"api_key_set": *true'; then
   echo "✅ PASS"
 else
-  echo "❌ FAIL — ensure Ollama is running: cd /home/nandha/server/sites/chatui && sudo docker compose up -d ollama"
+  echo "❌ FAIL — DEEPSEEK_API_KEY not loaded. Check $SITE_DIR/.env and rebuild the agent."
 fi
 
 # ─── 8. Summary ──────────────────────────────────────────────

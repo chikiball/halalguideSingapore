@@ -2,8 +2,9 @@
 # Halal Guide Singapore — Full Stack Docker Compose
 # 3 services: app (Node.js) + agent (Python) + searxng (search)
 #
-# Ollama is NOT here — it runs in the chatui stack at ollama:11434
-# on the shared server-net. No need to duplicate it.
+# The LLM is DeepSeek's hosted API (OpenAI-compatible) — no local
+# model container. Secrets (DEEPSEEK_API_KEY, MAPBOX_TOKEN) are read
+# from a gitignored .env file in this directory. See .env.example.
 # ═══════════════════════════════════════════════════════════════
 
 services:
@@ -18,6 +19,7 @@ services:
       - PORT=3000
       - NODE_ENV=production
       - AGENT_URL=http://halal-agent:5000
+      - MAPBOX_TOKEN=${MAPBOX_TOKEN:-}
     networks:
       - server-net
     depends_on:
@@ -51,8 +53,10 @@ services:
     expose:
       - "5000"
     environment:
-      # Ollama runs in the chatui stack as container "ollama" on server-net
-      - OLLAMA_URL=http://ollama:11434
+      # LLM is DeepSeek's hosted API (OpenAI-compatible). Key from .env.
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:?DEEPSEEK_API_KEY is required}
+      - DEEPSEEK_BASE_URL=${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
+      - DEEPSEEK_MODEL=${DEEPSEEK_MODEL:-deepseek-chat}
       - SEARXNG_URL=http://searxng:8080
       - NOMINATIM_URL=https://nominatim.openstreetmap.org
       - PYTHONUNBUFFERED=1

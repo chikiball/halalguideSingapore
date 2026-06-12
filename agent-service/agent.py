@@ -5,13 +5,14 @@ Orchestrates the 3-phase pipeline:
   Phase 2: Research  — gather evidence, classify halal status
   Phase 3: Writing   — LLM-generated articles
 
-Uses LangChain ChatOllama for LLM calls.
-Uses a structured pipeline (not ReAct) for reliability with llama3.1:8b.
+Uses the DeepSeek chat API (OpenAI-compatible) for LLM calls.
+Uses a structured pipeline (not ReAct) for reliability with deepseek-chat.
 """
 import asyncio
 import json
 import os
 import re
+import time
 from typing import List, Dict, Any, Optional
 
 import httpx
@@ -44,12 +45,14 @@ class HalalAgent:
 
     def __init__(
         self,
-        ollama_url: str,
+        api_key: str,
+        base_url: str,
         searxng_url: str,
         nominatim_url: str,
-        model: str = "llama3.1:8b",
+        model: str = "deepseek-chat",
     ):
-        self.ollama_url = ollama_url.rstrip("/")
+        self.api_key = api_key
+        self.base_url = base_url.rstrip("/")
         self.model = model
 
         # Initialize tools
@@ -57,7 +60,7 @@ class HalalAgent:
         self.scraper = ScraperTool()
         self.geocoder = GeocoderTool(nominatim_url)
         self.image_finder = ImageFinderTool(searxng_url)
-        self.classifier = HalalClassifier(ollama_url, model)
+        self.classifier = HalalClassifier(self.base_url, model)
 
         # Load prompts
         self.prompt_discovery = _load_prompt("discovery.txt")
@@ -69,13 +72,13 @@ class HalalAgent:
         # LLM call log (for debug panel)
         self._llm_calls: List[Dict] = []
 
-        print(f"🤖 HalalAgent initialized | model={model}")
+        print(f"🤖 HalalAgent initialized | provider=deepseek | model={model}")
 
     # ─── LLM call helper ──────────────────────────────────────────
 
     async def _call_llm(self, system: str, user: str, json_mode: bool = False) -> str:
         """
-        Call Ollama's chat API directly via httpx.
+        Call the DeepSeek chat API (OpenAI-compatible) via httpx.
 
         Args:
             system: System prompt
@@ -105,7 +108,7 @@ class HalalAgent:
             print(f"    | {line}")
         if user.count('\n') > 20:
             print(f"    | ... ({user.count(chr(10)) - 20} more lines)")
-        print(f"  ⏳ Calling Ollama...")
+        print(f"  ⏳ Calling DeepSeek...")
 
         payload = {
             "model": self.model,
@@ -114,30 +117,39 @@ class HalalAgent:
                 {"role": "user", "content": user},
             ],
             "stream": False,
-            "options": {
-                "temperature": 0.3,  # low temp for factual tasks
-                "num_predict": 2048,
-            },
+            "temperature": 0.3,  # low temp for factual tasks
+            "max_tokens": 2048,
         }
 
+        # DeepSeek JSON mode — requires the word "json" in the prompt (our
+        # prompts already say "Return ONLY a JSON object/array").
         if json_mode:
-            payload["format"] = "json"
+            payload["response_format"] = {"type": "json_object"}
 
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+
+        start = time.monotonic()
         try:
             async with httpx.AsyncClient(
                 timeout=httpx.Timeout(120.0, connect=10.0)
             ) as client:
                 resp = await client.post(
-                    f"{self.ollama_url}/api/chat",
+                    f"{self.base_url}/chat/completions",
                     json=payload,
+                    headers=headers,
                 )
                 resp.raise_for_status()
                 data = resp.json()
-                response_text = data.get("message", {}).get("content", "")
+                response_text = data["choices"][0]["message"]["content"] or ""
 
                 # Log the response
-                duration = data.get("total_duration", 0) / 1e9  # nanoseconds to seconds
-                print(f"  ✅ LLM RESPONSE #{call_id} ({len(response_text)} chars, {duration:.1f}s):")
+                duration = time.monotonic() - start
+                usage = data.get("usage", {})
+                print(f"  ✅ LLM RESPONSE #{call_id} ({len(response_text)} chars, {duration:.1f}s, "
+                      f"{usage.get('total_tokens', '?')} tokens):")
                 for line in response_text.split('\n')[:15]:
                     print(f"    | {line}")
                 if response_text.count('\n') > 15:

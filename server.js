@@ -12,6 +12,17 @@ app.use(express.json());
 
 // AI Agent routes (proxy to Python agent-service)
 require("./ai-routes")(app);
+
+// ─── Client config (injects the Mapbox token without committing it) ─────
+// Served as a blocking classic script so window.MAPBOX_TOKEN is defined
+// before the inline map script in index.html runs.
+app.get("/config.js", function (_req, res) {
+  var token = process.env.MAPBOX_TOKEN || "";
+  res.type("application/javascript");
+  res.set("Cache-Control", "no-cache");
+  res.send("window.MAPBOX_TOKEN = " + JSON.stringify(token) + ";");
+});
+
 // ─── Overpass API mirrors (fallback chain) ─────────────────────────────
 var OVERPASS_ENDPOINTS = [
   "https://overpass.kumi.systems/api/interpreter",
