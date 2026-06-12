@@ -19,6 +19,7 @@
   // ─── State ───
   let aiResearchCache = {};
   let currentPlaces = []; // shared reference to the places array
+  let searchToken = 0;    // bumped per search; stale runs bail out (see searchHalal)
 
   // ─── Debug helper — logs to debug panel if active ───
   function _dbg(tag, message) {
@@ -124,6 +125,12 @@
     const statusBar = document.getElementById("statusBar");
     const searchBtn = document.getElementById("searchBtn");
 
+    // Each invocation supersedes any in-flight search. Overlapping runs (GPS
+    // auto-search + the "Search here" popup + the main button) would otherwise
+    // fight over currentPlaces / the cards DOM / the empty state, which is how
+    // "No results found" could show while cards were on screen.
+    const myToken = ++searchToken;
+
     // Reset
     emptyState.classList.remove("active");
     cardsEl.innerHTML = "";
@@ -204,6 +211,10 @@
           const result = await researchPlace(place);
           checkedCount++;
 
+          // A newer search started while we were awaiting — drop this result
+          // so we don't render into / overwrite the current search's UI.
+          if (myToken !== searchToken) return;
+
           if (result && result.excluded) {
             _dbg("research", `🚫 [${i + 1}] ${place.name} → excluded (pork evidence)`);
             statusBar.innerHTML = `
@@ -262,6 +273,9 @@
 
       // Wait for all research to complete
       await Promise.all(researchPromises);
+
+      // A newer search superseded this one — let it own the final UI state.
+      if (myToken !== searchToken) return;
 
       // Fit map to verified places only
       if (window.map && window.L && currentPlaces.length > 0) {
