@@ -109,6 +109,12 @@ echo "  ✅ Nginx config deployed + reloaded"
 echo ""
 echo "🐳 Building and starting containers..."
 docker compose up -d --build
+
+# Rebuilding recreates the app container, often with a NEW IP on server-net.
+# nginx caches the upstream IP from its last reload (proxy_pass uses a static
+# hostname, no resolver) → 502 until reloaded again. Reload now to re-resolve.
+docker exec nginx-gateway nginx -s reload 2>/dev/null && \
+  echo "  ✅ Nginx reloaded (re-resolved app container IP)"
 echo ""
 
 # ─── 6. Wait for health checks ───────────────────────────────
