@@ -14,6 +14,9 @@ set -e
 SITE_DIR="/home/nandha/server/sites/halalguideSingapore"
 NGINX_DIR="/home/nandha/server/nginx/conf.d"
 REPO="https://github.com/chikiball/halalguideSingapore.git"
+# Git runs as this user (not root) so deploys don't leave a root-owned tree
+# that later blocks a plain `git pull`. Override with REPO_OWNER=... if needed.
+REPO_OWNER="${REPO_OWNER:-nandha}"
 
 echo "═══════════════════════════════════════════════════"
 echo "🕌 Halal Guide SG — AI Stack Deployment"
@@ -58,10 +61,14 @@ echo ""
 echo "📦 Updating repository..."
 if [ -d "$SITE_DIR" ]; then
   cd "$SITE_DIR"
-  git pull origin main
-  echo "  ✅ Repository updated"
+  # Heal any root-owned files left by older sudo-git runs, then pull AS the
+  # owner so the working tree + .git stay owned by $REPO_OWNER, not root.
+  chown -R "$REPO_OWNER:$REPO_OWNER" "$SITE_DIR"
+  sudo -u "$REPO_OWNER" git pull origin main
+  echo "  ✅ Repository updated (as $REPO_OWNER)"
 else
   git clone "$REPO" "$SITE_DIR"
+  chown -R "$REPO_OWNER:$REPO_OWNER" "$SITE_DIR"
   cd "$SITE_DIR"
   echo "  ✅ Repository cloned"
 fi
@@ -85,6 +92,10 @@ echo "  ✅ AI routes patched"
 # Update Dockerfile + fly.toml + .dockerignore
 bash server-setup/scripts/update-deploy-files.sh
 echo "  ✅ Deploy files updated"
+
+# The setup scripts above run as root and may rewrite tracked files; restore
+# ownership so the tree stays owned by $REPO_OWNER for future plain `git` use.
+chown -R "$REPO_OWNER:$REPO_OWNER" "$SITE_DIR"
 
 # ─── 4. Copy nginx config ────────────────────────────────────
 echo ""
