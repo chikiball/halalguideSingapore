@@ -533,7 +533,7 @@
 <body>
   <header>
     <h1>🕌 Halal Guide SG</h1>
-    <p>Find halal & Muslim-friendly food near you</p>
+    <p>✨AI powered - Find halal & Muslim-friendly food near you</p>
   </header>
 
   <!-- Geolocation prompt -->
@@ -564,11 +564,10 @@
 
     <div class="controls">
       <select id="radiusSelect" class="radius-select" aria-label="Search radius">
-        <option value="500">500m radius</option>
+        <option value="500" selected>500m radius</option>
         <option value="1000">1 km radius</option>
-        <option value="1500" selected>1.5 km radius</option>
+        <option value="1500">1.5 km radius</option>
         <option value="3000">3 km radius</option>
-        <option value="5000">5 km radius</option>
       </select>
       <button id="searchBtn" class="btn btn-primary" onclick="searchHalal()">
         🔍 Search
@@ -794,7 +793,7 @@
           pickedMarker = L.marker(e.latlng, {
             icon: pickedIcon,
             draggable: true,
-          }).addTo(map).bindPopup("<b>Search here</b>").openPopup();
+          }).addTo(map).bindPopup('<div style="text-align:center"><b>📍 Selected Location</b><br><button onclick="searchHalal()" style="margin-top:6px;padding:6px 16px;background:#1a6b4a;color:white;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer">🔍 Search here</button></div>').openPopup();
 
           // Update on drag end
           pickedMarker.on("dragend", function (ev) {
@@ -1106,11 +1105,22 @@
       return div.innerHTML;
     }
 
+    // Expose let-scoped vars for external modules (ai-search.js, ai-debug.js)
+    window.searchLat = undefined; window.searchLng = undefined;
+    window.markersLayer = undefined; window.map = undefined;
+    Object.defineProperty(window, "searchLat", { get: function() { return searchLat; }, set: function(v) { searchLat = v; } });
+    Object.defineProperty(window, "searchLng", { get: function() { return searchLng; }, set: function(v) { searchLng = v; } });
+    Object.defineProperty(window, "markersLayer", { get: function() { return markersLayer; } });
+    Object.defineProperty(window, "map", { get: function() { return map; } });
+    window.getDistance = getDistance;
+    window.escHtml = escHtml;
+
     // Handle escape key for modal
     document.addEventListener("keydown", (e) => {
       if (e.key === "Escape") closeModal();
     });
   </script>
-<script src="/ai-search.js"></script>
+<script src="/ai-search.js?v=7"></script>
+<script src="/ai-debug.js?v=7"></script>
 </body>
 </html>

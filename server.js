@@ -121,8 +121,11 @@ app.get("/api/halal", function (req, res) {
 
   queryOverpass(overpassQuery)
     .then(function (data) {
+      // Skip halal filter if ?all=true (hybrid mode: AI classifies instead)
+      var skipFilter = req.query.all === "true";
+
       // Filter for halal/Muslim-friendly places
-      var halalPlaces = data.elements.filter(function (el) {
+      var halalPlaces = skipFilter ? data.elements : data.elements.filter(function (el) {
         return isHalalFriendly(el.tags);
       });
 
