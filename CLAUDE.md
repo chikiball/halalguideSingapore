@@ -33,7 +33,7 @@ sudo docker exec halal-agent curl -s http://localhost:5000/health
 sudo bash server-setup/scripts/deploy-ai.sh
 ```
 
-This script handles: preflight checks → git pull → setup patches → nginx reload → docker build → health checks → integration tests.
+This script handles: preflight (Docker, `DEEPSEEK_API_KEY` in `.env`, `server-net`) → `chown` + `git pull` **as `$REPO_OWNER`** (default `nandha`, not root) → setup patches → nginx config reload → docker build → **nginx reload again to re-resolve the app container's new IP** → health checks → integration tests (probed via `docker exec`, since the app is only `expose`d, not host-published).
 
 For agent-only rebuilds: `sudo docker compose up -d --build agent`
 
@@ -78,6 +78,8 @@ Runs **before** the LLM. Scans compiled evidence text for pork menu items (char 
 
 Cards are **not** rendered from OSM immediately. `currentPlaces` starts empty and is populated as each place passes research. `cardIndex` is assigned as `currentPlaces.length` at push time — the array only ever grows, so indices are permanently stable for card DOM IDs and map marker click handlers.
 
+`searchHalal` can fire from several triggers (GPS auto-search, the main button, the map "Search here" popup), so each call bumps a module-level `searchToken`; the `await` continuations bail out when superseded. This prevents overlapping searches from sharing `currentPlaces`/the cards DOM and flashing a stale "No results found" over rendered cards.
+
 ### SSE Streaming Pattern
 
 Python agent yields Server-Sent Events in order: `status` → `research` → `status` → `article` → `done`. Frontend reads the stream in `researchPlace()` and splits on event type: `data.classification` → research result, `data.article || data.title` → article result. Both are cached in `aiResearchCache` keyed by `place.name + place.lat.toFixed(3)`.
@@ -101,9 +103,12 @@ Two-step: GET the MUIS directory page to extract CSRF token → POST to the JSON
 ## Critical Warnings
 
 - **`setup-agent-service.sh` creates stub files — NEVER re-run** after real implementations exist. It will overwrite `agent.py`, `main.py`, and all tools with empty stubs.
-- **`setup-step10.sh` patches `index.html` and `server.js`** — it adds `ai-search.js`/`ai-debug.js` script tags and bridges `window.searchLat/searchLng`. It is idempotent and safe to re-run.
-- **JS cache-busting**: after editing `ai-search.js` or `ai-debug.js`, bump the `?v=N` suffix in `index.html`: `sed -i 's/ai-search.js?v=[0-9]*/ai-search.js?v=N/' public/index.html`
-- **DeepSeek is the LLM** — a hosted OpenAI-compatible API, not a local model. `DEEPSEEK_API_KEY` (and `MAPBOX_TOKEN`) live in a gitignored `.env`; see `.env.example`. There is no Ollama/local-model container anymore.
+- **`setup-step10.sh` patches are now folded into the committed source** (`server.js` AI routes + `?all=true`; `index.html` window bridge, `ai-search.js`/`ai-debug.js` tags, header/radius/Search-here tweaks). Its idempotency guards now all detect "already present", so on deploy it's effectively a no-op. It stays in the pipeline as a safety net — keep the source in sync with its guards so it doesn't re-dirty the tree.
+- **JS cache-busting**: after editing `ai-search.js` or `ai-debug.js`, bump the `?v=N` suffix in `index.html` (currently `v=8`): `sed -i 's/ai-search.js?v=[0-9]*/ai-search.js?v=N/' public/index.html`
+- **Editing `public/*` or `server.js` requires an app rebuild** — static files are baked into the image and the container is `read_only`. `sudo docker compose up -d --build app` (a plain restart/pull won't pick them up).
+- **Never `sudo git` in the repo** — it leaves root-owned files that then block plain `git pull` ("unable to unlink … Permission denied"). The deploy script pulls as `$REPO_OWNER` and `chown`s the tree to keep it user-owned.
+- **nginx caches the app container's IP** — `halalguideSingapore.conf` uses a static `proxy_pass` hostname with no `resolver`, so a container rebuild (new IP) causes **502** until `docker exec nginx-gateway nginx -s reload`. The deploy script reloads after the build for this reason.
+- **DeepSeek is the LLM** — a hosted OpenAI-compatible API, not a local model. `DEEPSEEK_API_KEY` (and `MAPBOX_TOKEN`) live in a gitignored `.env`; see `.env.example`. There is no Ollama/local-model container anymore. To change the model, edit `DEEPSEEK_MODEL` in `.env` and rebuild the agent (note: `deepseek-reasoner` does **not** support `response_format` JSON mode, so it would need code changes in `_call_llm`).
 - **No persistent cache** — all AI research results are in-memory and lost on container restart.
 
 ## Key Environment Variables
