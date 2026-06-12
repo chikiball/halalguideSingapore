@@ -137,8 +137,10 @@ echo ""
 echo "🧪 Running integration tests..."
 
 # Test 1: App health
+# Probe from inside the container — the app is only `expose`d on 3000
+# (reached publicly via nginx), not published to the host.
 echo -n "  [1/5] App serves HTML: "
-if curl -sf http://localhost:3000/ | grep -q "Halal Guide"; then
+if docker exec halalguideSingapore curl -sf http://localhost:3000/ 2>/dev/null | grep -q "Halal Guide"; then
   echo "✅ PASS"
 else
   echo "❌ FAIL"
@@ -146,7 +148,7 @@ fi
 
 # Test 2: Overpass API (OSM search)
 echo -n "  [2/5] OSM search API: "
-RESULT=$(curl -sf "http://localhost:3000/api/halal?lat=1.3006&lng=103.8563&radius=1000" 2>/dev/null)
+RESULT=$(docker exec halalguideSingapore curl -sf "http://localhost:3000/api/halal?lat=1.3006&lng=103.8563&radius=1000" 2>/dev/null)
 if echo "$RESULT" | grep -q '"count"'; then
   COUNT=$(echo "$RESULT" | grep -oP '"count":\s*\K\d+')
   echo "✅ PASS ($COUNT places)"
